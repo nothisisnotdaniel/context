@@ -48,32 +48,6 @@
             }
         }
     }
-    @if (result is { } shown)
-    {
-        @if (shown.Kind == ActionKind.Done && shown.Reason == ActionReason.DoneLogLeft)
-        {
-            <p class="result red" role="status">@DesktopActions.DoneLogLeftText</p>
-        }
-        else if (shown.Kind == ActionKind.Done)
-        {
-            @if (shown.NextDue is { } nextDue)
-            {
-                <p class="result accent" role="status">Done: @(DesktopText.OneLine(shown.Text)). Next due @(nextDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)).</p>
-            }
-            else
-            {
-                <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
-            }
-        }
-        else
-        {
-            <p class="result red" role="status">@shown.Text</p>
-        }
-    }
-    else
-    {
-        <p class="result" role="status"></p>
-    }
     @if (asking is { } todoAsked)
     {
         <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
@@ -105,7 +79,6 @@
     private TodoItem? asking;
     private NoteTodo? askingNote;
     private bool running;
-    private ActionResult? result;
 
     // The merged rows split into Overdue, Today, Upcoming and No due date; Merge sorts by date with undated note todos
     // last, so each group is one run of rows. A group without rows is left out.
@@ -163,7 +136,7 @@
         running = true;
         try
         {
-            result = await Actions.CompleteTodo(todoAsked, confirmed);
+            ShowDone(await Actions.CompleteTodo(todoAsked, confirmed));
         }
         finally
         {
@@ -182,7 +155,7 @@
         running = true;
         try
         {
-            result = await Actions.CompleteNoteTodo(todoAsked, confirmed);
+            ShowDone(await Actions.CompleteNoteTodo(todoAsked, confirmed));
         }
         finally
         {
@@ -279,4 +252,11 @@
                 @text
             }</span>
     };
+
+    // Job 455: the tick's result goes to the status bar, worded as in the todo list.
+    private void ShowDone(ActionResult result)
+    {
+        (string text, string css) = TodoPanel.DoneLine(result);
+        Bar.Show(text, css);
+    }
 }

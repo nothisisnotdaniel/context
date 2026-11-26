@@ -33,7 +33,6 @@
             }
         </div>
     }
-    <p class="theme-result @themeResultClass" role="status">@themeResultText</p>
     <h3>Exchange calendar</h3>
     @if (link is null)
     {
@@ -60,7 +59,6 @@
             <button type="button" class="calendar-link-remove" disabled="@busy" @onclick="AskRemove">Remove link</button>
         }
     </div>
-    <p class="settings-result @resultClass" role="status">@resultText</p>
     <h3>Outlook</h3>
     @if (outlook is null)
     {
@@ -88,7 +86,6 @@
             Suggest todos from Outlook mail
         </label>
     }
-    <p class="outlook-result @outlookResultClass" role="status">@outlookResultText</p>
     <h3>Pasting</h3>
     @if (fetchTitles is not bool fetchOn)
     {
@@ -103,7 +100,6 @@
         </label>
         <p class="fetch-titles-hint grey">@FetchTitlesHintText</p>
     }
-    <p class="fetch-titles-result @fetchTitlesResultClass" role="status">@fetchTitlesResultText</p>
     <h3>Screenshots</h3>
     <p class="screenshot-hotkey grey">@(State.IsMac ? ScreenshotHotkeyText : ScreenshotWindowsText)</p>
     @if (screenshots is null)
@@ -137,7 +133,6 @@
             <button type="button" class="screenshot-folder-remove" disabled="@busy" @onclick="RemoveScreenshotFolder">Remove folder</button>
         }
     </div>
-    <p class="screenshot-result @screenshotResultClass" role="status">@screenshotResultText</p>
     <h3>Command bar</h3>
     <p class="command-bar-hotkey grey">@(State.IsMac ? CommandBarHotkeyText : CommandBarOtherText)</p>
     @if (!State.TimesCommandFound)
@@ -178,7 +173,6 @@
                @oninput="RepositoryTyped" @onkeydown="e => AddRepository(e)" />
         <button type="button" class="repository-add" disabled="@busy" @onclick="() => AddRepository(null)">Add</button>
     </div>
-    <p class="repository-result @repositoryResultClass" role="status">@repositoryResultText</p>
     <h3>Sensitive notes</h3>
     @if (key is null)
     {
@@ -244,7 +238,6 @@
             <button type="button" class="pro-remove" disabled="@busy" @onclick="AskRemovePro">@DesktopText.ProRemoveLabel</button>
         }
     </div>
-    <p class="pro-result @proResultClass" role="status">@proResultText</p>
     @if (removingPro)
     {
         <ConfirmDialog Question="@DesktopText.ProRemoveQuestion" ConfirmLabel="Remove" Busy="busy"
@@ -314,14 +307,14 @@
     private CalendarLinkView? link;
     private SensitiveKeyView? key;
     private OutlookSettingView? outlook;
-    private string outlookResultText = string.Empty;
-    private string outlookResultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long outlookResultId;
     private AppTheme? theme;
-    private string themeResultText = string.Empty;
-    private string themeResultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long themeResultId;
     private bool? fetchTitles;
-    private string fetchTitlesResultText = string.Empty;
-    private string fetchTitlesResultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long fetchTitlesResultId;
 
     // Changes after every toggle, so the checkbox is built anew and shows what is stored, also after a failed save.
     private int fetchTitlesKey;
@@ -330,12 +323,12 @@
     private RepositoryFoldersView? repositories;
     private string typedRepository = string.Empty;
     private int repositoryFieldKey;
-    private string repositoryResultText = string.Empty;
-    private string repositoryResultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long repositoryResultId;
     private string typedFolder = string.Empty;
     private int screenshotFieldKey;
-    private string screenshotResultText = string.Empty;
-    private string screenshotResultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long screenshotResultId;
 
     // The typed link: never rendered, cleared once it is saved and when the panel closes.
     private string typed = string.Empty;
@@ -345,8 +338,8 @@
     private bool busy;
     private bool replacing;
     private bool removing;
-    private string resultText = string.Empty;
-    private string resultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long resultId;
 
     // Suite Pro (job 367).
     private ProView? pro;
@@ -354,8 +347,8 @@
     private string typedKey = string.Empty;
     private int proFieldKey;
     private bool removingPro;
-    private string proResultText = string.Empty;
-    private string proResultClass = string.Empty;
+    // Job 455: the id of this section's latest result in the status bar.
+    private long proResultId;
     private ElementReference proHeading;
     private int proFocusSeen;
     private bool proFocusPending;
@@ -571,8 +564,7 @@
 
     private void ShowProResult(string text, string cssClass)
     {
-        proResultText = text;
-        proResultClass = cssClass;
+        proResultId = Bar.Update(proResultId, text, cssClass);
     }
 
     private static string Expires(KeyDetails details) =>
@@ -720,8 +712,7 @@
             busy = false;
         }
 
-        outlookResultText = DesktopText.OneLine(result.Text);
-        outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        outlookResultId = Bar.Update(outlookResultId, DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
         await Load();
     }
 
@@ -745,8 +736,7 @@
             busy = false;
         }
 
-        outlookResultText = DesktopText.OneLine(result.Text);
-        outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        outlookResultId = Bar.Update(outlookResultId, DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
         await Load();
     }
 
@@ -773,14 +763,12 @@
         if (result.Kind == ActionKind.Done)
         {
             theme = chosen;
-            themeResultText = DesktopActions.ThemeText(chosen);
-            themeResultClass = "accent";
+            themeResultId = Bar.Update(themeResultId, DesktopActions.ThemeText(chosen), "accent");
             await OnThemeChanged.InvokeAsync();
         }
         else
         {
-            themeResultText = DesktopActions.SettingsNotSavedText;
-            themeResultClass = "red";
+            themeResultId = Bar.Update(themeResultId, DesktopActions.SettingsNotSavedText, "red");
         }
 
         await Load();
@@ -806,8 +794,7 @@
             busy = false;
         }
 
-        fetchTitlesResultText = DesktopText.OneLine(result.Text);
-        fetchTitlesResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        fetchTitlesResultId = Bar.Update(fetchTitlesResultId, DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
         fetchTitlesKey++;
         await Load();
     }
@@ -815,8 +802,7 @@
     private void ScreenshotFolderTyped(ChangeEventArgs e)
     {
         typedFolder = e.Value?.ToString() ?? string.Empty;
-        screenshotResultText = string.Empty;
-        screenshotResultClass = string.Empty;
+        screenshotResultId = Bar.Update(screenshotResultId, string.Empty, string.Empty);
     }
 
     // Enter in the folder field or Save folder; a saved folder empties the field.
@@ -870,16 +856,14 @@
 
     private async Task ScreenshotDone(ActionResult result)
     {
-        screenshotResultText = DesktopText.OneLine(result.Text);
-        screenshotResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        screenshotResultId = Bar.Update(screenshotResultId, DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
         await Load();
     }
 
     private void RepositoryTyped(ChangeEventArgs e)
     {
         typedRepository = e.Value?.ToString() ?? string.Empty;
-        repositoryResultText = string.Empty;
-        repositoryResultClass = string.Empty;
+        repositoryResultId = Bar.Update(repositoryResultId, string.Empty, string.Empty);
     }
 
     // Enter in the repository field or Add; an added folder empties the field.
@@ -933,8 +917,7 @@
 
     private async Task RepositoryDone(ActionResult result)
     {
-        repositoryResultText = DesktopText.OneLine(result.Text);
-        repositoryResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        repositoryResultId = Bar.Update(repositoryResultId, DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
         await Load();
     }
 
@@ -979,7 +962,6 @@
 
     private void ShowResult(string text, string cssClass)
     {
-        resultText = text;
-        resultClass = cssClass;
+        resultId = Bar.Update(resultId, text, cssClass);
     }
 }

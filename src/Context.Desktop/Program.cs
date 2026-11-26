@@ -213,6 +213,8 @@ internal static class Program
         // Job 396: what this start's update check found, shown in Settings' Version section.
         UpdateStatus updateStatus = new UpdateStatus();
         builder.Services.AddSingleton(updateStatus);
+        // Job 455: the status bar along the bottom of the window; every feedback message goes there.
+        builder.Services.AddSingleton(new StatusBar());
         builder.Services.AddTransient<EditorInterop>();
         builder.Services.AddSingleton<IAutoSavePause>(new AutoSavePause());
         // Filled in once the window exists; the guard only calls it after a save-first finished.

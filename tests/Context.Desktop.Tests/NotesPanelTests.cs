@@ -10,6 +10,11 @@ public sealed class NotesPanelTests : IDisposable
 {
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // 240 AC-1: the stored entries that name an existing note, newest first; an entry naming no note (deleted or
@@ -243,19 +248,19 @@ public sealed class NotesPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Home"], cut.FindAll("button.saved-search").Select(b => b.TextContent).ToArray()), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Removed saved search Work.", cut.Find("p.saved-search-result").TextContent), Wait);
-        Assert.True(cut.Find("p.saved-search-result").ClassList.Contains("grey"));
-        Assert.Equal("status", cut.Find("p.saved-search-result").GetAttribute("role"));
-        Assert.Null(cut.Find("p.saved-search-result").Closest("nav"));
+        Bar.WaitForAssertion(() => Assert.Equal(
+            "Removed saved search Work.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
+        Assert.Equal("status", Bar.Find("p.main-status").GetAttribute("role"));
+        Assert.Empty(cut.FindAll("p.saved-search-result"));
 
         // Removed outside the app, not yet refreshed: the button is still shown.
         data.WriteFile(SettingsStore.FileName, "{\"savedSearches\":[]}");
         await cut.Find("button.saved-search-remove[aria-label='Remove Home']").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "That saved search is gone. Nothing was done.", cut.Find("p.saved-search-result").TextContent), Wait);
-        Assert.True(cut.Find("p.saved-search-result").ClassList.Contains("red"));
+        Bar.WaitForAssertion(() => Assert.Equal(
+            "That saved search is gone. Nothing was done.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
     }
 
     // AC-4: an empty folder shows the empty state.
@@ -370,7 +375,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal(["Plan"], opened);
         cut.WaitForAssertion(() => Assert.Equal(string.Empty, cut.Find(".note-new-title").GetAttribute("value")), Wait);
-        IElement status = cut.Find(".note-entry-result");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal("Created Plan", status.TextContent);
         Assert.True(status.ClassList.Contains("accent"));
         Assert.Equal("status", status.GetAttribute("role"));
@@ -394,7 +399,7 @@ public sealed class NotesPanelTests : IDisposable
         await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = title });
         await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        IElement status = cut.Find(".note-entry-result");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal(text, status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
         Assert.Equal("status", status.GetAttribute("role"));
@@ -403,6 +408,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Empty(opened);
         await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "x" });
         Assert.Empty(cut.FindAll(".note-entry-result"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal("a", File.ReadAllText(Path.Combine(data.Root, "Alpha.md")));
     }
 
@@ -1160,8 +1166,8 @@ public sealed class NotesPanelTests : IDisposable
             await PinnedName(cut, "B").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
         }
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't write pinned.json.", cut.Find("p.pinned-result").TextContent), Wait);
-        IElement line = cut.Find("p.pinned-result");
+        Bar.WaitForAssertion(() => Assert.Equal("Can't write pinned.json.", data.StatusBar.Text), Wait);
+        IElement line = Bar.Find(".main-status");
         Assert.True(line.ClassList.Contains("red"));
         Assert.Equal("status", line.GetAttribute("role"));
         Assert.Equal(["A", "B"], PinnedOrder(cut));
@@ -1171,7 +1177,8 @@ public sealed class NotesPanelTests : IDisposable
         await PinnedName(cut, "B").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
 
         WaitPinnedOrder(cut, "B", "A");
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("p.pinned-result")), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal(string.Empty, data.StatusBar.Text), Wait);
+        Assert.Empty(cut.FindAll("p.pinned-result"));
     }
 
     private static string[] PinnedOrder(IRenderedComponent<NotesPanel> cut) =>

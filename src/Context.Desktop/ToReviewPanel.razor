@@ -40,10 +40,6 @@
                 }
             </ul>
         }
-        @if (failure is { } shown)
-        {
-            <p class="review-result red" role="status">@shown</p>
-        }
         @if (asking is { } asked)
         {
             <ConfirmDialog Question="@($"Remove the review date from {DesktopText.OneLine(asked.Note)}?")" ConfirmLabel="Remove"
@@ -70,13 +66,14 @@
 
     private bool running;
     private NoteReview? asking;
-    private string? failure;
+    // Job 455: the id of this panel's red failure line in the status bar.
+    private long failureId;
 
     private void Ask(NoteReview review)
     {
         if (!running)
         {
-            failure = null;
+            Bar.Clear(failureId);
             asking = review;
         }
     }
@@ -118,12 +115,12 @@
         }
 
         running = true;
-        failure = null;
+        Bar.Clear(failureId);
         try
         {
             if (Guard is not null && await Guard(review.Note) is { } held)
             {
-                failure = DesktopText.OneLine(held);
+                failureId = Bar.Show(DesktopText.OneLine(held), "red");
                 return;
             }
 
@@ -134,7 +131,7 @@
             }
             else
             {
-                failure = DesktopText.OneLine(result.Text);
+                failureId = Bar.Show(DesktopText.OneLine(result.Text), "red");
             }
         }
         finally

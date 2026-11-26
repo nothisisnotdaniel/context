@@ -963,6 +963,9 @@ public sealed class DesktopSourceTests
                 text = text.Replace(CrashLogDelete, string.Empty, StringComparison.Ordinal);
             }
 
+            // 455: Bar.Clear( empties the status bar (StatusBar, in memory), never a store or the data folder.
+            text = Regex.Replace(text, @"\bBar\.Clear\(", string.Empty);
+
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));
         }
 
@@ -2798,7 +2801,11 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain("new Confirmation(", razor, StringComparison.Ordinal);
         Assert.DoesNotContain("Session.Lock(", razor, StringComparison.Ordinal);
 
-        List<string> shown = Regex.Matches(razor, @"ShowStatus\(([^;]*)\);").Select(m => m.Groups[1].Value).ToList();
+        // 455: ShowStatus forwards to the status bar; its own definition is not a call.
+        List<string> shown = Regex.Matches(razor, @"ShowStatus\(([^;]*)\);")
+            .Select(m => m.Groups[1].Value)
+            .Where(s => !s.StartsWith("string text, string cssClass)", StringComparison.Ordinal))
+            .ToList();
         Assert.NotEmpty(shown);
         Assert.All(
             shown,
@@ -2813,7 +2820,6 @@ public sealed class DesktopSourceTests
     [Theory]
     [InlineData(".triage-panel {")]
     [InlineData(".triage-buttons,")]
-    [InlineData(".triage-status:empty {")]
     public void AppCss_StylesTheTriagePanel(string selector)
     {
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
@@ -3651,7 +3657,7 @@ public sealed class DesktopSourceTests
         Assert.Contains("background: var(--accent-strong);", pressed, StringComparison.Ordinal);
         Assert.Contains("border-color: var(--accent-strong);", pressed, StringComparison.Ordinal);
         Assert.Contains("color: var(--on-accent);", pressed, StringComparison.Ordinal);
-        Assert.Matches(@"\.settings-panel \.theme-result:empty \{\s*display: none;\s*\}", app);
+        Assert.DoesNotContain(".theme-result", app, StringComparison.Ordinal);
 
         string light = ThemeBlock(app, ":root {");
         foreach (string theme in new[] { light, ThemeBlock(app, "@media (prefers-color-scheme: dark) {"), ThemeBlock(app, ":root[data-theme=\"dark\"] {") })

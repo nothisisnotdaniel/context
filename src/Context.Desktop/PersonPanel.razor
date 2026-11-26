@@ -30,7 +30,6 @@
             {
                 <p class="grey" role="status">No notes, appointments or todos mention @DesktopText.OneLine(Person).</p>
             }
-            @TopicResult()
         }
         else
         {
@@ -72,7 +71,6 @@
                 </ul>
             }
             @TopicsSection(view)
-            @TopicResult()
             @if (view.Waiting.Count > 0)
             {
                 <h2>Waiting for</h2>
@@ -135,7 +133,8 @@
 @code {
     private PersonView? view;
     private NoteTopic? askingTopic;
-    private ActionResult? topicResult;
+    // Job 455: the id of the red failed-tick line in the status bar.
+    private long topicId;
     private bool running;
     private string? loaded;
     private int request;
@@ -149,14 +148,6 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
-    // The red line of a failed tick, right under the Topics list.
-    private RenderFragment TopicResult() => __builder =>
-    {
-        @if (topicResult is { Kind: not ActionKind.Done } failed)
-        {
-            <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
-        }
-    };
 
     // The open topics (job 253): a checkbox asks first, the text, and the note's name opening the note.
     private RenderFragment TopicsSection(PersonView shown) => __builder =>
@@ -208,7 +199,8 @@
         running = true;
         try
         {
-            topicResult = await Actions.CompleteTopic(topic, confirmed);
+            ActionResult ticked = await Actions.CompleteTopic(topic, confirmed);
+            topicId = Bar.Update(topicId, ticked.Kind == ActionKind.Done ? string.Empty : DesktopText.OneLine(ticked.Text), "red");
         }
         finally
         {
@@ -227,7 +219,7 @@
         // Another person: their rows are not known yet, so the old ones go.
         loaded = Person;
         view = null;
-        topicResult = null;
+        Bar.Clear(topicId);
         return Load();
     }
 

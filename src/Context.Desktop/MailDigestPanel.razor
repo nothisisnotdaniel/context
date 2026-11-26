@@ -51,15 +51,10 @@
                             <button type="button" class="digest-accept" aria-label="@("Accept: " + DesktopText.OneLine(s.Text))" disabled="@running" @ref="row.AcceptButton" @onclick="() => Accept(row, index)">Accept</button>
                             <button type="button" class="digest-dismiss" aria-label="@("Dismiss: " + DesktopText.OneLine(s.Text))" disabled="@running" @onclick="() => Dismiss(row, index)">Dismiss</button>
                         </span>
-                        @if (row.Result is { } result)
-                        {
-                            <p class="digest-result red" role="status">@result</p>
-                        }
                     </li>
                 }
             </ul>
         }
-        <p class="mail-digest-result @resultClass" role="status">@resultText</p>
     }
 </section>
 
@@ -83,8 +78,8 @@
     private bool running;
     private OutlookStatus? status;
     private List<Row> rows = [];
-    private string resultText = string.Empty;
-    private string resultClass = string.Empty;
+    // Job 455: the id of this panel's latest Accept result in the status bar.
+    private long resultId;
     private int request;
 
     // After an Accept or Dismiss: the row index whose Accept button gets the focus (the read button when none is left).
@@ -155,8 +150,7 @@
         }
 
         reading = true;
-        resultText = string.Empty;
-        resultClass = string.Empty;
+        Bar.Clear(resultId);
         StateHasChanged();
         MailDigestView view;
         try
@@ -198,15 +192,12 @@
         if (result.Kind == ActionKind.Done)
         {
             rows.Remove(row);
-            resultText = AcceptedText + " " + DesktopText.OneLine(result.Text);
-            resultClass = "accent";
+            resultId = Bar.Show(AcceptedText + " " + DesktopText.OneLine(result.Text), "accent");
             focusIndex = index;
             return;
         }
 
-        row.Result = DesktopText.OneLine(result.Text);
-        resultText = string.Empty;
-        resultClass = string.Empty;
+        resultId = Bar.Show(DesktopText.OneLine(result.Text), "red");
         focusIndex = index;
     }
 
@@ -219,8 +210,7 @@
 
         State.HideMailSuggestion(row.Suggestion);
         rows.Remove(row);
-        resultText = string.Empty;
-        resultClass = string.Empty;
+        Bar.Clear(resultId);
         focusIndex = index;
     }
 
@@ -239,13 +229,11 @@
         return DesktopText.OneLine(s.Source.Sender) + " · " + received.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
     }
 
-    // One shown suggestion, its Accept button and the line of a refused or failed Accept.
+    // One shown suggestion and its Accept button.
     private sealed class Row(MailSuggestion suggestion)
     {
         public MailSuggestion Suggestion { get; } = suggestion;
 
         public ElementReference AcceptButton { get; set; }
-
-        public string? Result { get; set; }
     }
 }

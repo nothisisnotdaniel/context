@@ -13,6 +13,11 @@ public sealed class ProSettingsTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string ActivationPath => Path.Combine(data.ActivationFolder, LicenceActivationFile.FileName);
@@ -33,7 +38,7 @@ public sealed class ProSettingsTests : IDisposable
         Assert.Equal("status", state.GetAttribute("role"));
         Assert.Equal("No Pro licence activated.", state.TextContent);
         Assert.Contains("grey", state.ClassList);
-        Assert.Equal("status", cut.Find("p.pro-result").GetAttribute("role"));
+        Assert.Empty(cut.FindAll("p.pro-result"));
         Assert.Empty(cut.FindAll("button.pro-remove"));
         Assert.Equal(1, data.LicenceStore.Reads);
     }
@@ -126,9 +131,9 @@ public sealed class ProSettingsTests : IDisposable
         await TypeKey(cut, " " + token + " ");
         await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Suite Pro activated for Ada Lovelace · updates until 2027-12-31.", cut.Find("p.pro-result").TextContent), Wait);
-        Assert.Contains("accent", cut.Find("p.pro-result").ClassList);
+        Bar.WaitForAssertion(() => Assert.Equal(
+            "Suite Pro activated for Ada Lovelace · updates until 2027-12-31.", data.StatusBar.Text), Wait);
+        Assert.Equal("accent", data.StatusBar.Css);
         cut.WaitForAssertion(() => Assert.Equal(
             "Suite Pro: Ada Lovelace · updates until 2027-12-31.", cut.Find("p.pro-state").TextContent), Wait);
         Assert.Contains("accent", cut.Find("p.pro-state").ClassList);
@@ -139,7 +144,7 @@ public sealed class ProSettingsTests : IDisposable
 
         // The typed key went with the save: Activate again finds the field empty.
         await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Paste your licence key first.", cut.Find("p.pro-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Paste your licence key first.", data.StatusBar.Text), Wait);
         Assert.Single(data.LicenceStore.Writes);
     }
 
@@ -152,7 +157,7 @@ public sealed class ProSettingsTests : IDisposable
         await TypeKey(cut, data.Licences.Token());
         await cut.Find("input.pro-key").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.StartsWith("Suite Pro activated for", cut.Find("p.pro-result").TextContent, StringComparison.Ordinal), Wait);
+        Bar.WaitForAssertion(() => Assert.StartsWith("Suite Pro activated for", data.StatusBar.Text, StringComparison.Ordinal), Wait);
     }
 
     [Theory]
@@ -165,8 +170,8 @@ public sealed class ProSettingsTests : IDisposable
         await TypeKey(cut, key);
         await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(text, cut.Find("p.pro-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find("p.pro-result").ClassList);
+        Bar.WaitForAssertion(() => Assert.Equal(text, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Empty(data.LicenceStore.Writes);
         Assert.False(File.Exists(ActivationPath));
         Assert.Equal("No Pro licence activated.", cut.Find("p.pro-state").TextContent);
@@ -199,7 +204,7 @@ public sealed class ProSettingsTests : IDisposable
 
         release.Set();
         await click;
-        cut.WaitForAssertion(() => Assert.StartsWith("Suite Pro activated for Grace Hopper", cut.Find("p.pro-result").TextContent, StringComparison.Ordinal), Wait);
+        Bar.WaitForAssertion(() => Assert.StartsWith("Suite Pro activated for Grace Hopper", data.StatusBar.Text, StringComparison.Ordinal), Wait);
         Assert.False(cut.Find("input.pro-key").HasAttribute("disabled"));
     }
 
@@ -212,14 +217,14 @@ public sealed class ProSettingsTests : IDisposable
 
         await TypeKey(cut, data.Licences.Token());
         await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Can't save the licence. Nothing was stored.", cut.Find("p.pro-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Can't save the licence. Nothing was stored.", data.StatusBar.Text), Wait);
 
         data.LicenceStore.WriteThrows = false;
         File.WriteAllText(data.ActivationFolder, "not a folder");
         await TypeKey(cut, data.Licences.Token());
         await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Can't write the activation file. Nothing was stored.", cut.Find("p.pro-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find("p.pro-result").ClassList);
+        Bar.WaitForAssertion(() => Assert.Equal("Can't write the activation file. Nothing was stored.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Null(data.LicenceStore.Stored);
         cut.WaitForAssertion(() => Assert.Equal("No Pro licence activated.", cut.Find("p.pro-state").TextContent), Wait);
     }
@@ -244,7 +249,7 @@ public sealed class ProSettingsTests : IDisposable
         Assert.Equal(0, data.LicenceStore.Deletes);
         Assert.Equal(token, data.LicenceStore.Stored);
         Assert.True(File.Exists(ActivationPath));
-        Assert.Equal(string.Empty, cut.Find("p.pro-result").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
     }
 
     // AC-7: confirming deletes the key and the file, and the state line goes back to none.
@@ -257,8 +262,8 @@ public sealed class ProSettingsTests : IDisposable
         await cut.Find("button.pro-remove").ClickAsync(new MouseEventArgs());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Suite Pro licence removed from this computer.", cut.Find("p.pro-result").TextContent), Wait);
-        Assert.Contains("accent", cut.Find("p.pro-result").ClassList);
+        Bar.WaitForAssertion(() => Assert.Equal("Suite Pro licence removed from this computer.", data.StatusBar.Text), Wait);
+        Assert.Equal("accent", data.StatusBar.Css);
         cut.WaitForAssertion(() => Assert.Equal("No Pro licence activated.", cut.Find("p.pro-state").TextContent), Wait);
         Assert.Empty(cut.FindAll("button.pro-remove"));
         Assert.Empty(cut.FindAll("[role=dialog]"));

@@ -68,19 +68,6 @@
     {
         <p class="red editor-failed" role="alert">The editor couldn't start. @DisplayName was not changed.</p>
     }
-    <p class="status @statusClass" role="status">
-        @if (statusLines.Count > 0)
-        {
-            @foreach ((string text, string css) in statusLines)
-            {
-                <span class="line cut @css" title="@text">@text</span>
-            }
-        }
-        else
-        {
-            @statusText
-        }
-    </p>
     <div class="editor-host" @ref="host"></div>
 </section>
 
@@ -96,9 +83,8 @@
     private bool locked;
     private bool saving;
     private bool dirty;
-    private string statusText = string.Empty;
-    private string statusClass = string.Empty;
-    private List<(string Text, string Css)> statusLines = [];
+    // The id of the editor's own latest message in the status bar (job 455), so clearing it never clears another's.
+    private long statusId;
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private CancellationTokenSource? pause;
     private bool disposed;
@@ -277,9 +263,11 @@
             }
 
             string text = edited ? await Interop.GetMarkdownAsync(host) : note.Text;
-            (string Text, string Css, List<(string Text, string Css)> Lines) before = (statusText, statusClass, statusLines);
+            StatusBar.Message before = Bar.Current;
+            long previousId = statusId;
             saving = true;
             ShowStatus("Saving…", "grey");
+            long savingId = statusId;
             StateHasChanged();
             ActionResult result = await Actions.SaveNote(note, text, auto);
             if (disposed)
@@ -289,7 +277,9 @@
 
             if (auto && result.Kind == ActionKind.Refused && result.Reason == ActionReason.Busy)
             {
-                (statusText, statusClass, statusLines) = before;
+                // Job 455: the bar shows what it showed before, as long as nothing else replaced Saving… meanwhile.
+                Bar.Restore(savingId, before);
+                statusId = previousId;
                 RestartPause();
             }
             else if (result.Kind == ActionKind.Done)
@@ -402,9 +392,7 @@
             shown.Insert(shown.Count, (DesktopText.OneLine(line.Text), css));
         }
 
-        statusText = string.Empty;
-        statusClass = string.Empty;
-        statusLines = shown;
+        statusId = Bar.Show(shown);
         StateHasChanged();
     }
 
@@ -1347,10 +1335,6 @@
         titleFetches = new CancellationTokenSource();
     }
 
-    private void ShowStatus(string text, string cssClass)
-    {
-        statusText = text;
-        statusClass = cssClass;
-        statusLines = [];
-    }
+    // Job 455: the editor's messages go to the status bar; an empty text clears only the editor's own latest message.
+    private void ShowStatus(string text, string cssClass) => statusId = Bar.Update(statusId, text, cssClass);
 }

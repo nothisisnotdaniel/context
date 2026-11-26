@@ -54,21 +54,6 @@
                 </ul>
             }
         }
-        @if (result is { } done)
-        {
-            @if (done.Kind == ActionKind.Done && done.Reason == ActionReason.DoneLogLeft)
-            {
-                <p class="red meeting-todo-result" role="status">@DesktopActions.DoneLogLeftText</p>
-            }
-            else if (done.Kind == ActionKind.Done && done.NextDue is { } moved)
-            {
-                <p class="accent meeting-todo-result" role="status">Moved to @moved.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture).</p>
-            }
-            else if (done.Kind != ActionKind.Done)
-            {
-                <p class="red meeting-todo-result" role="status">@DesktopText.OneLine(done.Text)</p>
-            }
-        }
         @if (picking is { } pickFor && upcoming is { } choices)
         {
             @if (choices.Count == 0)
@@ -102,7 +87,8 @@
     private int request;
     private string newText = string.Empty;
     private bool running;
-    private ActionResult? result;
+    // Job 455: the id of this panel's latest result in the status bar.
+    private long resultId;
     private TodoItem? asking;
     private TodoItem? picking;
     private IReadOnlyList<Appointment>? upcoming;
@@ -130,7 +116,7 @@
 
         loaded = (Day, Title, NoteName);
         appointments = null;
-        result = null;
+        SetResult(null);
         picking = null;
         upcoming = null;
         return Load();
@@ -175,7 +161,7 @@
         try
         {
             ActionResult added = await Actions.AddMeetingTodo(shown[0], newText);
-            result = added.Kind == ActionKind.Done ? null : added;
+            SetResult(added.Kind == ActionKind.Done ? null : added);
             if (added.Kind == ActionKind.Done)
             {
                 newText = string.Empty;
@@ -199,7 +185,7 @@
         try
         {
             ActionResult tied = await Actions.TieTodo(id, first);
-            result = tied.Kind == ActionKind.Done ? null : tied;
+            SetResult(tied.Kind == ActionKind.Done ? null : tied);
         }
         finally
         {
@@ -218,12 +204,12 @@
         running = true;
         picking = null;
         upcoming = null;
-        result = null;
+        SetResult(null);
         try
         {
             if (await State.NextMeeting(todo) is { } next)
             {
-                result = await Actions.TieTodo(todo.Id, next);
+                SetResult(await Actions.TieTodo(todo.Id, next));
                 return;
             }
 
@@ -247,7 +233,7 @@
         running = true;
         try
         {
-            result = await Actions.TieTodo(todo.Id, chosen);
+            SetResult(await Actions.TieTodo(todo.Id, chosen));
             picking = null;
             upcoming = null;
         }
@@ -284,12 +270,26 @@
         try
         {
             ActionResult completed = await Actions.CompleteTodo(todo, confirmed);
-            result = completed.Kind == ActionKind.Done && completed.Reason != ActionReason.DoneLogLeft ? null : completed;
+            SetResult(completed.Kind == ActionKind.Done && completed.Reason != ActionReason.DoneLogLeft ? null : completed);
         }
         finally
         {
             running = false;
             asking = null;
         }
+    }
+
+    // Job 455: a result goes to the status bar (red done-log or failure line, accent "Moved to …"); a result with no
+    // line, or none, clears this panel's own message.
+    private void SetResult(ActionResult? result)
+    {
+        (string text, string css) = result switch
+        {
+            { Kind: ActionKind.Done, Reason: ActionReason.DoneLogLeft } => (DesktopActions.DoneLogLeftText, "red"),
+            { Kind: ActionKind.Done, NextDue: { } moved } => ($"Moved to {moved.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)}.", "accent"),
+            { Kind: not ActionKind.Done } failed => (DesktopText.OneLine(failed.Text), "red"),
+            _ => (string.Empty, string.Empty),
+        };
+        resultId = Bar.Update(resultId, text, css);
     }
 }

@@ -19,6 +19,11 @@ public sealed class AllTodosPanelTests : IDisposable
 
     private int closed;
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-2: the page's root, heading and close button.
@@ -191,12 +196,15 @@ public sealed class AllTodosPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            IElement result = cut.Find("p.result");
+            IElement result = Bar.Find(".main-status");
             Assert.Equal("Done: Stored", result.TextContent);
             Assert.Contains("accent", result.ClassList);
             Assert.Equal("status", result.GetAttribute("role"));
+        }, Wait);
+        cut.WaitForAssertion(() =>
+        {
             Assert.Equal(["Other"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
         }, Wait);
         Assert.Equal(["Other"], data.Todos!.List().Select(t => t.Text).ToArray());
@@ -213,9 +221,12 @@ public sealed class AllTodosPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: call Anna", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Done: call Anna", cut.Find("p.result").TextContent);
             Assert.Empty(cut.FindAll("li.todo"));
         }, Wait);
         Assert.Equal("- {x} call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
@@ -231,9 +242,12 @@ public sealed class AllTodosPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: Stretch. Next due 2026-10-30.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Done: Stretch. Next due 2026-10-30.", cut.Find("p.result").TextContent);
             Assert.Equal(["2026-10-30 Stretch"], cut.FindAll("li.todo").Select(Line).ToArray());
         }, Wait);
     }
@@ -249,9 +263,9 @@ public sealed class AllTodosPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            IElement result = cut.Find("p.result");
+            IElement result = Bar.Find(".main-status");
             Assert.Equal("Meeting no longer exists. Nothing was done.", result.TextContent);
             Assert.Contains("red", result.ClassList);
         }, Wait);
@@ -274,9 +288,9 @@ public sealed class AllTodosPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            IElement result = cut.Find("p.result");
+            IElement result = Bar.Find(".main-status");
             Assert.Equal(DesktopActions.DoneLogLeftText, result.TextContent);
             Assert.Contains("red", result.ClassList);
         }, Wait);

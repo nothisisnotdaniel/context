@@ -15,6 +15,11 @@ public sealed class SensitiveSetupTests : IDisposable
     private readonly List<string> done = [];
     private int cancelled;
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-4: the dialog names the loss case, and its password fields never render a value.
@@ -215,8 +220,8 @@ public sealed class SensitiveSetupTests : IDisposable
         await cut.Find("input.recovery-password-again").InputAsync(new ChangeEventArgs { Value = Password });
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Recovery file saved. Keep it and its password safe.", cut.Find(".sensitive-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal(
+            "Recovery file saved. Keep it and its password safe.", data.StatusBar.Text), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("button.sensitive-setup-open")), Wait);
         Assert.Single(cut.FindAll("button.sensitive-restore-open"));

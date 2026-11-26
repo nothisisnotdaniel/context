@@ -17,6 +17,11 @@ public sealed class TriagePanelTests : IDisposable
     private readonly List<string> triaged = [];
     private int closed;
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string InboxPath => Path.Combine(data.Root, "inbox.md");
@@ -137,8 +142,8 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("second", cut.Find(".triage-item .text").TextContent), Wait);
-        Assert.Equal("Created Call Anna.", cut.Find(".triage-status").TextContent);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("accent"));
+        Assert.Equal("Created Call Anna.", data.StatusBar.Text);
+        Assert.Equal("accent", data.StatusBar.Css);
         Assert.Empty(cut.FindAll(".triage-form"));
         Assert.Equal("1 left", cut.Find(".triage-left").TextContent);
         Assert.NotEqual(titleId, panelId);
@@ -197,8 +202,8 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-date").InputAsync(new ChangeEventArgs { Value = "someday" });
         await cut.Find("input.triage-date").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        Assert.Equal("Type a date: yyyy-MM-dd, today or tomorrow.", cut.Find(".triage-status").TextContent);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.Equal("Type a date: yyyy-MM-dd, today or tomorrow.", data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
 
         Assert.Empty(cut.FindAll("button.triage-submit"));
@@ -206,7 +211,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-date").InputAsync(new ChangeEventArgs { Value = string.Empty });
         await cut.Find("input.triage-date").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added: call Anna", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Added: call Anna", data.StatusBar.Text), Wait);
         TodoItem todo = Assert.Single(data.State!.Snapshot!.Todos);
         Assert.Equal(DesktopFixture.Today, todo.Due);
         Assert.Equal("# inbox\n- second\n", File.ReadAllText(InboxPath));
@@ -270,8 +275,8 @@ public sealed class TriagePanelTests : IDisposable
 
         await cut.Find("input.triage-follow-up").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added: waiting: @[Anna] send the offer", cut.Find(".triage-status").TextContent), Wait);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("accent"));
+        Bar.WaitForAssertion(() => Assert.Equal("Added: waiting: @[Anna] send the offer", data.StatusBar.Text), Wait);
+        Assert.Equal("accent", data.StatusBar.Css);
         Assert.Equal("second", cut.Find(".triage-item .text").TextContent);
         Assert.Empty(cut.FindAll(".triage-form"));
         TodoItem todo = Assert.Single(data.State!.Snapshot!.Todos);
@@ -292,7 +297,7 @@ public sealed class TriagePanelTests : IDisposable
 
         await cut.Find("input.triage-person").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added: waiting: @[Anna] call Anna", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Added: waiting: @[Anna] call Anna", data.StatusBar.Text), Wait);
         Assert.Equal(DesktopFixture.Today.AddDays(1), Assert.Single(data.State!.Snapshot!.Todos).Due);
     }
 
@@ -306,16 +311,16 @@ public sealed class TriagePanelTests : IDisposable
 
         await cut.Find("input.triage-person").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.TriagePersonText, cut.Find(".triage-status").TextContent), Wait);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Bar.WaitForAssertion(() => Assert.Equal(DesktopActions.TriagePersonText, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
 
         await cut.Find("input.triage-person").InputAsync(new ChangeEventArgs { Value = "Anna" });
         await cut.Find("input.triage-follow-up").InputAsync(new ChangeEventArgs { Value = "someday" });
         await cut.Find("input.triage-follow-up").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        Assert.Equal(DesktopActions.TriageDateText, cut.Find(".triage-status").TextContent);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.Equal(DesktopActions.TriageDateText, data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
         Assert.Equal(InboxText, File.ReadAllText(InboxPath));
         Assert.Equal("call Anna", cut.Find(".triage-item .text").TextContent);
@@ -332,17 +337,17 @@ public sealed class TriagePanelTests : IDisposable
         await Key(cut, "a");
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Nope" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        Assert.Equal("No note named Nope.", cut.Find(".triage-status").TextContent);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.Equal("No note named Nope.", data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
 
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "inbox" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        Assert.Equal("Pick a note other than inbox.", cut.Find(".triage-status").TextContent);
+        Assert.Equal("Pick a note other than inbox.", data.StatusBar.Text);
 
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "plan" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added to Plan.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Added to Plan.", data.StatusBar.Text), Wait);
         Assert.Equal("# Plan\n- call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal(["Plan"], triaged);
     }
@@ -360,7 +365,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Secret" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added to Secret.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Added to Secret.", data.StatusBar.Text), Wait);
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Null(data.State!.Session.Note);
         string path = Path.Combine(data.Root, "Secret" + NoteStore.SensitiveExtension);
@@ -386,8 +391,8 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Secret" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't unlock Secret.", cut.Find(".triage-status").TextContent), Wait);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Bar.WaitForAssertion(() => Assert.Equal("Can't unlock Secret.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
@@ -409,7 +414,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("second", cut.Find(".triage-item .text").TextContent), Wait);
-        Assert.Equal("Dropped.", cut.Find(".triage-status").TextContent);
+        Assert.Equal("Dropped.", data.StatusBar.Text);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("# inbox\n- second\n", File.ReadAllText(InboxPath));
     }
@@ -423,12 +428,12 @@ public sealed class TriagePanelTests : IDisposable
 
         await Key(cut, "l");
         await Key(cut, "1");
-        cut.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-10-30.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-10-30.", data.StatusBar.Text), Wait);
         cut.WaitForAssertion(() => Assert.Equal("second", cut.Find(".triage-item .text").TextContent), Wait);
 
         await Key(cut, "L");
         await Key(cut, "2");
-        cut.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-11-05.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-11-05.", data.StatusBar.Text), Wait);
         cut.WaitForAssertion(() => Assert.Equal("The inbox is empty. 2 lines are snoozed.", cut.Find(".triage-empty").TextContent), Wait);
         Assert.Equal(
             "# inbox\n" + Line + " snooze:2026-10-30\n- second snooze:2026-11-05\n",
@@ -447,14 +452,14 @@ public sealed class TriagePanelTests : IDisposable
         Assert.Equal("Next week (2)", cut.Find("button.triage-week").TextContent);
         await cut.Find("input.triage-until").InputAsync(new ChangeEventArgs { Value = "today" });
         await cut.Find("input.triage-until").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        Assert.Equal("Pick a day after today.", cut.Find(".triage-status").TextContent);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.Equal("Pick a day after today.", data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(InboxText, File.ReadAllText(InboxPath));
 
         await cut.Find("input.triage-until").InputAsync(new ChangeEventArgs { Value = "2026-12-01" });
         await cut.Find("input.triage-until").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-12-01.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-12-01.", data.StatusBar.Text), Wait);
         Assert.Contains(Line + " snooze:2026-12-01\n", File.ReadAllText(InboxPath), StringComparison.Ordinal);
     }
 
@@ -473,8 +478,8 @@ public sealed class TriagePanelTests : IDisposable
         await Key(cut, "l");
         await Key(cut, "1");
 
-        Assert.Equal("Save inbox first.", cut.Find(".triage-status").TextContent);
-        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.Equal("Save inbox first.", data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal([null], asked);
         Assert.Equal(InboxText, File.ReadAllText(InboxPath));
     }
@@ -535,7 +540,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Plan" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        Assert.Equal("Save Plan first.", cut.Find(".triage-status").TextContent);
+        Assert.Equal("Save Plan first.", data.StatusBar.Text);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
@@ -557,7 +562,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Plan" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added to Plan.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Added to Plan.", data.StatusBar.Text), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# Plan\n\nTyped\n- call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
@@ -579,13 +584,13 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Plan" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Added to Plan.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Added to Plan.", data.StatusBar.Text), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# Plan\n- call Anna\n", js.MountedText());
 
         js.Edit("# Plan\n- call Anna\nMore\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("# Plan\n- call Anna\nMore\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 
@@ -604,7 +609,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "d" });
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Dropped.", cut.Find(".triage-status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Dropped.", data.StatusBar.Text), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# inbox\n- second\n", js.MountedText());
 
@@ -613,7 +618,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "l" });
         await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "1" });
 
-        Assert.Equal("Save inbox first.", cut.Find(".triage-status").TextContent);
+        Assert.Equal("Save inbox first.", data.StatusBar.Text);
         Assert.Equal("# inbox\n- second\n", File.ReadAllText(InboxPath));
     }
 

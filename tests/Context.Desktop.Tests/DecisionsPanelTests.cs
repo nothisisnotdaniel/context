@@ -17,6 +17,11 @@ public sealed class DecisionsPanelTests : IDisposable
 
     public DecisionsPanelTests() => data.WriteDecisionFolder();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-8, 343 AC-10: heading, Close, per row a grey date, the number (or grey unnumbered), a note button with the
@@ -142,11 +147,11 @@ public sealed class DecisionsPanelTests : IDisposable
         Assert.Equal("Copy reference to Decision zz99-4", copy.GetAttribute("aria-label"));
 
         await cut.FindAll("button.decision-copy")[0].ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Copied #!d1234.", cut.Find("p.decision-copied").TextContent), Wait);
-        Assert.True(cut.Find("p.decision-copied").ClassList.Contains("grey"));
+        Bar.WaitForAssertion(() => Assert.Equal("Copied #!d1234.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
 
         await cut.FindAll("button.decision-copy")[1].ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Copied #!dzz99-4.", cut.Find("p.decision-copied").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Copied #!dzz99-4.", data.StatusBar.Text), Wait);
 
         Assert.Equal(
             ["#!d1234", "#!dzz99-4"],
@@ -166,7 +171,8 @@ public sealed class DecisionsPanelTests : IDisposable
 
         await cut.Find("button.decision-copy").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't copy #!d7.", cut.Find("p.red[role=status]").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Can't copy #!d7.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
     }
 
     // 349 AC-5: a copy (same token, same text) in other notes is one row for the owner, with Also in naming them.

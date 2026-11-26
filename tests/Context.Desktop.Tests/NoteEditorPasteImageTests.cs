@@ -31,9 +31,9 @@ public sealed class NoteEditorPasteImageTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.insertAttachment").Count), Wait);
         cut.WaitForAssertion(
-            () => Assert.StartsWith("Attached paste-", cut.Find(".note-editor .status .line").TextContent, StringComparison.Ordinal),
+            () => Assert.StartsWith("Attached paste-", cut.Find(".main-status .line").TextContent, StringComparison.Ordinal),
             Wait);
-        Assert.True(cut.Find(".note-editor .status .line").ClassList.Contains("accent"));
+        Assert.True(cut.Find(".main-status .line").ClassList.Contains("accent"));
         Assert.Equal(
             [
                 [".attachments/paste-20261126-093000.png", "paste-20261126-093000.png", true, "image/png", Convert.ToBase64String(Png)],
@@ -50,7 +50,7 @@ public sealed class NoteEditorPasteImageTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(inserted, File.ReadAllText(PlanPath));
     }
 
@@ -69,9 +69,9 @@ public sealed class NoteEditorPasteImageTests : IDisposable
         cut.WaitForAssertion(
             () => Assert.Equal(
                 "paste-20261126-093000 isn't a PNG, JPEG, GIF, WebP or PDF file. Nothing was attached.",
-                cut.Find(".note-editor .status .line").TextContent),
+                cut.Find(".main-status .line").TextContent),
             Wait);
-        Assert.True(cut.Find(".note-editor .status .line").ClassList.Contains("red"));
+        Assert.True(cut.Find(".main-status .line").ClassList.Contains("red"));
         Assert.Empty(js.Calls("ContextEditor.insertAttachment"));
         Assert.False(Directory.Exists(Path.Combine(data.Root, ".attachments")));
     }

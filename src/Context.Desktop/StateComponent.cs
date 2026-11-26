@@ -16,6 +16,10 @@ public abstract class StateComponent : ComponentBase, IDisposable
     [Inject]
     internal DesktopActions Actions { get; set; } = null!;
 
+    /// <summary>The window's status bar (job 455): every feedback message goes there.</summary>
+    [Inject]
+    internal StatusBar Bar { get; set; } = null!;
+
     /// <summary>The latest snapshot, or <c>null</c> before the first refresh.</summary>
     internal DesktopSnapshot? Snapshot => State.Snapshot;
 

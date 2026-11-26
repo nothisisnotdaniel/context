@@ -806,7 +806,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     <note>.`) per skipped note. CLI: `Cli.MigrateTodos` runs it first and writes those lines to stderr (stdout and the
     exit code unchanged). Desktop: `Program.cs` calls `DesktopActions.ConvertTodoMarkers()` once before
     `todos.Migrate()`; a non-empty report is offered through `DesktopState.OfferConversion`/`TakeConversion` and `Main`
-    shows it in the status line (accent when lines changed, red otherwise).
+    shows it in the status bar (accent when lines changed, red otherwise).
     `TagIndex` stores them per plain note (`note_todos`); the note stays the only source. `NoteTodos.Load(store, index)`
     syncs and returns them; `NoteTodos.Merge(stored, notes)` gives the `TodoEntry` list both front ends show: by due date,
     on one date the `todos.json` todos first (`List()` order), then note todos by note name ignoring case, then ordinal,
@@ -1176,7 +1176,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
     debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `AllTodosPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `MailDigestPanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
-    public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
+    public parameters). **Status bar (job 455):** every feedback message (the result of a save, share, move, copy, setting change or failed action) goes to the one `StatusBar` singleton (`StatusBar.cs`, also injected by `StateComponent` as `Bar`; tests use `DesktopFixture.StatusBar`): `Show(text, css)` / `Show(lines)` replace the shown message (all text through `DesktopText.OneLine`) and return its id, `Clear(id)` and `Update(id, "", css)` empty the bar only while that id is still shown (so one panel never clears another's newer message), `Restore(id, before)` puts back the editor's previous message after a save refused as Busy. `StatusBarView` (rendered once by `Main`, outside `.layout` and the snapshot branches) draws `footer.status-bar` with `p.main-status.cut[role=status]` (`title` = full text; a multi-line message is one `span.line.cut` per line); `app.css` fixes it at `bottom: 0` and `.layout` leaves `--status-bar-height` free. The panels' own result lines (`*-result`, `p.status`, `p.triage-status`, the copied line, the todo `p.result`) are gone. Lines that stay in their panels: `Loading…`, empty states, `Can't read …`, usage hints, `import-result`, `update-mode`/`update-last`, `pro-state`, `decision-clash`, `role=alert` lines and `CrashHintBar`. `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
     hook `BeforeWrite`. `CompleteTodo(todo, confirmation)` removes the todo with `todo.Id` through
     `TodoStore.Complete(id, today, out next)` (today from the local clock; `ActionResult.NextDue` holds the next todo's
@@ -1402,7 +1402,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Removed saved search <name>.`) are the only writers. End the day (`end-day`) is the first item of the More actions menu while today's daily note is open (job 216, plain
     and sensitive alike; job 200 had it on the dashboard). `Main.RunPageAction("end-day")` saves unsaved editor text
     first (a failed save is red `Save <name> first.` and nothing is written), calls
-    `DesktopActions.EndDay(Snapshot.Today)`, shows the result in `p.main-status` (grey on Done/Unchanged, `Day closed.
+    `DesktopActions.EndDay(Snapshot.Today)`, shows the result in the status bar (grey on Done/Unchanged, `Day closed.
     Moved <n> todo(s) to <D+1>.`, else red) and then reloads the editor (`NoteEditor.ReloadAsync`) so the new
     `## Worked` and `## Moved to tomorrow` sections show and a later save is not refused as changed on disk; Standup
     (`standup`, job 265) is the next item on today's note and works the same way through
@@ -1448,7 +1448,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `div.theme-choice` (`role="group"`, `aria-labelledby` the heading) with `button.theme-system`/`-light`/`-dark`
     (`System`, `Light`, `Dark`, in a flex row; exactly the saved one `aria-pressed="true"`, filled with `--accent-strong` and `--on-accent`; all disabled while busy; grey `Loading…` in
     `p.theme-state` until `DesktopState.ThemeSetting()` (never throws, `System` on error) has loaded) and
-    `p.theme-result` (`role="status"`). Clicking a button that isn't pressed runs `DesktopActions.SetTheme(AppTheme)`
+    the status bar. Clicking a button that isn't pressed runs `DesktopActions.SetTheme(AppTheme)`
     (Core `SettingsStore.ReadTheme`/`SaveTheme`, exactly `"appearance":{"theme":"system"|"light"|"dark"}`, anything else
     reads as `System`, a broken file throws only when it can't be read or isn't an object; the save replaces
     `appearance`, keeps the rest, re-checks `dayEnd` and `savedSearches`, 64 KiB limit; `SettingsStore.ThemeName` gives
@@ -1487,7 +1487,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `button.note-button` (`RequestOpen`), a todo card's text in `span.board-todo`, and `button.board-move` ← / →
     (`Move to <col>`, the columns on either side; a No status card only to the first). A drop on another column or a
     move button calls `DesktopActions.MoveBoardCard` (`BoardView.Move`): Done reloads; Changed, Missing, Failed and
-    Busy show their red line in `p.board-result`. Grey `No board for #tag. Add it under "boards" in settings.json.`,
+    Busy show their red line in the status bar. Grey `No board for #tag. Add it under "boards" in settings.json.`,
     red `Can't read settings.json.`, red `Can't read the board.`, grey `No notes or todos have #tag.`. It reloads on
     `State.Changed`, keeping the shown cards.
     **People (job 239):** `PeoplePanel` (`section.page.people-panel`, the person icon `button.people-open` in `NotesPanel`'s
@@ -1517,7 +1517,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     in their date group). Rows are built like `TodoPanel`'s (checkbox, `span.date` class, time, repeat, text with mention
     buttons to `OnPerson`); a note todo has `button.todo-note` (`OnOpen`, Main's `RequestOpen`), a tied todo
     `button.todo-meeting` (`OnMeeting((Title, Day))`, Main's `OpenAppointment`) plus grey `Meeting cancelled or moved` for
-    an id in `MeetingHints`. Ticking asks the same `Mark this todo done?` dialog and shows the same `p.result` texts as
+    an id in `MeetingHints`. Ticking asks the same `Mark this todo done?` dialog and shows the same status-bar texts as
     `TodoPanel`; grey `No open todos. Add one in the todo list or type - { } in a note.` only when both lists are empty and
     readable, red `Can't read todos.json` / `Can't read the note todos.` otherwise. The sidebar `TodoPanel` stays as it is.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
@@ -1560,7 +1560,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     3 characters to search.` and `Search text can be at most 200 characters.`. When results show (`Found`/`NoMatches`
     of either kind) `button.search-save` `Save search` opens `input.search-save-name` (`aria-label`/placeholder `Search
     name`, maxlength 50, focused): Return calls `Actions.SaveSearch(name, trimmed query)` (its only action), Esc hides
-    it; the result is `p.search-save-result` (`role=status`, accent on Done, else red). Reload and stale-result rules as
+    it; the result goes to the status bar (accent on Done, else red). Reload and stale-result rules as
     the other panels. Opening a note or `Today` closes it.
     Job 379: a text whose trim is `#<n>` (`SearchPanel.IsWorkItemQuery`) goes to `State.Search(text, from, to)` before
     the `TagFilter.IsTagFilter` check (`#project` stays a tag filter). After the input, `div.search-dates` holds
@@ -1610,7 +1610,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `HistoryStore.Keep`, the target is saved as its text without trailing line breaks + `\n\n` + the source's text (BOM
     dropped, its own links rewritten) through `SaveIfUnchanged(..., HistoryStore)`, the source removed with `Delete(...,
     removeHistory: false, removeAttachments: false)` and other notes' links rewritten as on rename (`LinksLeft` text
-    `Merged <s> into <t>, but links in <k> notes couldn't be updated: ...`). The result is `p.similar-result` (accent on
+    `Merged <s> into <t>, but links in <k> notes couldn't be updated: ...`). The result goes to the status bar (accent on
     Done); `Main.Merged` opens the target when the source was open and reloads an open clean target. A merged note is
     recovered by creating a note with its name and opening History.
     **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
@@ -1776,7 +1776,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     attendees, under the index lock) shows in `AppointmentPanel` as `section.topics` (`h3 Topics`, rows `Person: text`)
     above `h3 Notes`, only with rows and a readable index. Each row: `input.done` asks through `ConfirmDialog`
     (`Mark this topic done?`), then `DesktopActions.CompleteTopic(topic, confirmation)`; a non-Done result is the red
-    `p.topic-result`; `button.topic-note` opens the note. `OpenMeetingNote` passes `DesktopState.TopicsFor(attendees)`
+    the status bar; `button.topic-note` opens the note. `OpenMeetingNote` passes `DesktopState.TopicsFor(attendees)`
     to `MeetingNote.Ensure` when the note doesn't exist yet. The CLI is unchanged.
     **Review dates (job 256, Core `ReviewDateParser.cs`, `NoteReviews.cs`):** the first line outside fences that is
     optional spaces/tabs, optionally `-`/`*`/`+` and one space, `review:` (ASCII case ignored), optional spaces/tabs,
@@ -1792,7 +1792,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     rows or unreadable: `section.to-review`, `h3 To review`, red `Can't read the review dates.`) has per
     `li.review-item` `button.review-note` (opens), grey `since yyyy-MM-dd` when overdue, `button.review-3m`,
     `button.review-1y` and `button.review-remove` (`ConfirmDialog` `Remove the review date from <name>?`); a
-    non-Done result is the red `p.review-result`. `Main.ReviewHeld` refuses with `Save <name> first.` when the note is
+    non-Done result is red in the status bar. `Main.ReviewHeld` refuses with `Save <name> first.` when the note is
     open with unsaved changes (nothing saved); `Main.Reviewed` reloads the open, clean note. `Briefing.Compose` writes
     `## To review` after `## Follow-ups`: `- [[<name>]]` per due note (` (due yyyy-MM-dd)` when overdue), else
     `- Nothing to review.` or, with `null` reviews (`DesktopState.ReviewsForBriefing`), `- Can't read the review
@@ -1860,7 +1860,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     or Failed/WriteFailed `Can't write pinned.json.`. Each pinned `li` is `draggable="true"` (`dragstart` remembers the
     rendered name, `dragend` forgets it, `drop` on another pinned row moves; nothing is read from `DataTransfer`);
     Alt+ArrowUp/Down on a pinned `button.name` (`aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"`) moves it past the
-    visible pinned row above/below. A failed move shows red `p.pinned-result[role=status]` above the pinned list until
+    visible pinned row above/below. A failed move shows red in the status bar until
     the next Done move. Recent rows are not draggable. A whole-folder snapshot that includes `context.db` while panels may still load goes
     through `DesktopFixture.SnapshotUnderIndexGate(syncFirst)` (under `IndexGate`; `syncFirst: true` for "before"), since
     reading the file during a panel's index sync fails on macOS. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
@@ -2004,7 +2004,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `select.times-project` (`No project`, then `DesktopState.TimesProjects()` rows as `#<n> <title>` through `OneLine`,
     value the 1-based position), `input.times-name` (maxlength 200, focused on open), `button.times-book`,
     `button.times-cancel`; Enter books, Esc (field or select) and Cancel close it and focus Checkpoint…. The result is
-    `p.times-result` (`role="status"`): accent `TimesBooking.BookedText` (`Booked <arrival|break|break end|leaving|checkpoint
+    the status bar: accent `TimesBooking.BookedText` (`Booked <arrival|break|break end|leaving|checkpoint
     <name>> at <H:mm> in Times.`), then the form closes and the panel reads `TimesNow` once; or red `TimesBooking.Outcome`'s
     text (the form keeps its input). While a run is pending every control is `disabled`, the section `aria-busy="true"`,
     and a second click runs nothing. Context never writes the Times folder: `tm` does. `StateComponent.OnDisposing` is the hook to drop extra subscriptions. A click
@@ -2031,7 +2031,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     any case) and `CreateSubpage`'s code with its texts (a sibling, the dated note included: `Note <name> already
     exists.`), in one `Run`; Done closes the field and `OnCreated` goes to `Main.AppointmentNoteCreated`
     (`RequestOpen`, so a dirty editor asks first, then accent `Created <name>`); a refusal shows the red
-    `p.create-note-result` (`role="status"`) and keeps the field, its text and focus. Esc or Cancel closes it with
+    the status bar and keeps the field, its text and focus. Esc or Cancel closes it with
     nothing written and focuses the link again; a second click while open focuses the field.
     **Meeting todos** (job 287; the desktop has no `/current`, so the appointment page stands in for it and for the
     appointment's menu; `context current` is unchanged): `MeetingTodosPanel` (`section.meeting-todos`, `h3 Todos`) sits
@@ -2116,7 +2116,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     focus moves to the next row's Accept). `DesktopActions.AcceptSuggestion`: Todo `AddTodo(text, today)`, FollowUp
     `AddTodo(text, due)`, MeetingNote `CreateWithText(Title, "# Title\n\nFrom mail by <Sender>, <yyyy-MM-dd>.\n")`
     (Refused/Invalid with the `ValidateTitle` text, Refused/Exists with `ExistsText(Title)`); Done hides the row,
-    Refused/Failed keep it with `p.digest-result`. Accepted and dismissed suggestions are hidden for the session in
+    Refused/Failed keep it with a red status-bar line. Accepted and dismissed suggestions are hidden for the session in
     memory only (`DesktopState.HideMailSuggestion`); no mail text is written, logged or cached in files, and the CLI,
     `review` and the briefing never see it (`MailDigestPanelTests`, `MailDigestActionsTests`).
     **Smart paste** (job 244): `editor/src/paste.js` (DOM-free): `tableText` (CRLF/CR to `\n`, one trailing `\n`

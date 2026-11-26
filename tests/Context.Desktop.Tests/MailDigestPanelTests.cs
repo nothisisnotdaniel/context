@@ -15,6 +15,11 @@ public sealed class MailDigestPanelTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private static MailMessage Mail(
@@ -284,7 +289,7 @@ public sealed class MailDigestPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(["Please call Bob."], Texts(cut)), Wait);
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal(("Please send it.", DesktopFixture.Today), (added.Text, added.Due));
-        Assert.Contains("accent", cut.Find(".mail-digest-result").ClassList);
+        Assert.Equal("accent", data.StatusBar.Css);
         cut.WaitForAssertion(() => Assert.Equal(ids[1], LastFocusId()), Wait);
     }
 
@@ -301,8 +306,9 @@ public sealed class MailDigestPanelTests : IDisposable
 
         await cut.Find(".digest-row button.digest-accept").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Note Planning already exists.", cut.Find(".digest-row .digest-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find(".digest-row .digest-result").ClassList);
+        cut.WaitForAssertion(() => Assert.Equal("Note Planning already exists.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains("red", cut.Find(".main-status").ClassList);
+        Assert.Empty(cut.FindAll(".digest-row .digest-result"));
         Assert.Equal(["Planning"], Texts(cut));
         Assert.Equal("# Planning\nmine\n", File.ReadAllText(Path.Combine(data.Root, "Planning.md")));
     }

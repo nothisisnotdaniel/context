@@ -11,6 +11,11 @@ public sealed class NoteEditorGlossaryTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-7: after mount the page gets every term with its meanings, one line each, as "<meaning> (<note title>)".
@@ -43,7 +48,7 @@ public sealed class NoteEditorGlossaryTests : IDisposable
 
         await js.Change(cut, "# Plan\n\nFoo:: bar\n");
         data.AutoSave.Elapse();
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
 
         IRenderedComponent<NoteEditor> other = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Other"));
         other.WaitForAssertion(() => Assert.True(other.Instance.IsReady), Wait);

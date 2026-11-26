@@ -259,8 +259,8 @@ public sealed class EditingFlowTests : IDisposable
         await RunPalette(cut, "/save");
 
         Assert.Equal("# Plan\n\nFrom the palette\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent);
-        Assert.Contains("accent", cut.Find(".note-editor .status").ClassList);
+        Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent);
+        Assert.Contains("accent", cut.Find(".main-status").ClassList);
         Assert.Empty(cut.FindAll("button.save"));
     }
 

@@ -17,6 +17,11 @@ public sealed class SearchPanelTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-10: heading, Close, one note button (full name in title) and grey line (full text in title) per hit; nothing
@@ -421,8 +426,8 @@ public sealed class SearchPanelTests : IDisposable
         await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "  My   budget " });
         await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved search My budget.", cut.Find("p.search-save-result").TextContent), Wait);
-        AngleSharp.Dom.IElement result = cut.Find("p.search-save-result");
+        Bar.WaitForAssertion(() => Assert.Equal("Saved search My budget.", data.StatusBar.Text), Wait);
+        AngleSharp.Dom.IElement result = Bar.Find(".main-status");
         Assert.True(result.ClassList.Contains("accent"));
         Assert.Equal("status", result.GetAttribute("role"));
         Assert.Empty(cut.FindAll("input.search-save-name"));
@@ -448,6 +453,7 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Empty(cut.FindAll("input.search-save-name"));
         Assert.Single(cut.FindAll("button.search-save"));
         Assert.Empty(cut.FindAll("p.search-save-result"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
@@ -463,9 +469,9 @@ public sealed class SearchPanelTests : IDisposable
         await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
         await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            DesktopActions.SearchNameBlankText, cut.Find("p.search-save-result").TextContent), Wait);
-        Assert.True(cut.Find("p.search-save-result").ClassList.Contains("red"));
+        Bar.WaitForAssertion(() => Assert.Equal(
+            DesktopActions.SearchNameBlankText, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Single(cut.FindAll("input.search-save-name"));
         Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
     }
@@ -1053,7 +1059,7 @@ public sealed class SearchPanelTests : IDisposable
         await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
         await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Reviews" });
         await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        cut.WaitForAssertion(() => Assert.Equal("Saved search Reviews.", cut.Find("p.search-save-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved search Reviews.", data.StatusBar.Text), Wait);
         SavedSearch saved = Assert.Single(new SettingsStore(data.Root).ReadSavedSearches());
         Assert.Equal("review", saved.Query);
         Assert.DoesNotContain("2026", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);

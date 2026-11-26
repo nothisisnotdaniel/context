@@ -96,6 +96,8 @@ body {
 }
 
 body {
+    /* 455: the height of the status bar along the bottom; .layout leaves exactly this much room for it. */
+    --status-bar-height: 28px;
     background: var(--background);
     color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -142,7 +144,40 @@ ol {
 .layout {
     display: grid;
     grid-template-columns: 240px minmax(0, 1fr) 280px;
-    height: 100%;
+    height: calc(100% - var(--status-bar-height));
+}
+
+/* 455: every feedback message, fixed along the bottom of the window, so it never scrolls away or hides in a panel. */
+.status-bar {
+    align-items: center;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    bottom: 0;
+    display: flex;
+    height: var(--status-bar-height);
+    left: 0;
+    padding: 0 16px;
+    position: fixed;
+    right: 0;
+    /* Below the dialog backdrop (z-index 10), so an open dialog dims the bar too. */
+    z-index: 9;
+}
+
+.status-bar .main-status {
+    flex: 1 1 auto;
+    margin: 0;
+    min-width: 0;
+}
+
+/* A multi-line message (the editor's one line per dropped file) shares the bar's one row. */
+.status-bar .main-status .line {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: bottom;
+}
+
+.status-bar .main-status .line + .line {
+    margin-left: 12px;
 }
 
 .notes-region,
@@ -428,10 +463,6 @@ input[type="checkbox"]:disabled {
     cursor: default;
 }
 
-.result {
-    min-height: 1.2em;
-}
-
 .dialog-backdrop {
     align-items: center;
     background: rgba(0, 0, 0, 0.4);
@@ -702,10 +733,6 @@ p.decision-clash button {
     padding: 0 8px;
 }
 
-.decision-copied {
-    color: var(--grey);
-}
-
 /* The similar notes panel (job 268): both note names, the grey reason and the two Keep buttons on one line; on a
    narrow window the line wraps instead of squeezing the reason. */
 .similar-rows li {
@@ -737,15 +764,7 @@ p.decision-clash button {
     max-width: 12em;
 }
 
-.similar-result {
-    margin: 8px 0 0;
-}
-
-/* The main region's status line and the bars above the editor and the tag panel. */
-.main-status:empty,
-.note-editor .status:empty {
-    display: none;
-}
+/* The bars above the editor and the tag panel. */
 
 .editor-bar,
 .panel-bar {
@@ -868,14 +887,8 @@ p.decision-clash button {
 }
 
 .note-editor .unreadable,
-.note-editor .editor-failed,
-.note-editor .status {
+.note-editor .editor-failed {
     margin: 8px 0 0;
-}
-
-/* One line per dropped file in the editor's status line. */
-.note-editor .status .line {
-    display: block;
 }
 
 .editor-host {
@@ -914,10 +927,6 @@ p.decision-clash button {
     color: var(--on-accent);
 }
 
-.add-result {
-    min-height: 1.2em;
-}
-
 /* New note: the entry row under the notes list. */
 .note-entry {
     border-top: 1px solid var(--line);
@@ -937,13 +946,6 @@ p.decision-clash button {
     border-color: var(--accent-strong);
     color: var(--on-accent);
     flex: none;
-}
-
-.note-entry-result {
-    margin: 6px 0 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 /* The top bar: a slim bar flush to the top and the sides of the main region, icons on the right. */
@@ -1390,11 +1392,6 @@ p.decision-clash button {
     margin-top: 12px;
 }
 
-.sensitive-result {
-    margin: 6px 0 0;
-    overflow-wrap: anywhere;
-}
-
 .sensitive-setup {
     display: flex;
     flex-direction: column;
@@ -1518,14 +1515,6 @@ p.decision-clash button {
     flex: none;
 }
 
-.settings-panel .screenshot-result {
-    margin: 6px 0 0;
-}
-
-.settings-panel .screenshot-result:empty {
-    display: none;
-}
-
 /* The repository folders of work item pages (job 280): one row per folder with Remove, then the entry row. */
 .repository-list {
     list-style: none;
@@ -1568,22 +1557,6 @@ p.decision-clash button {
     flex: none;
 }
 
-.settings-panel .repository-result {
-    margin: 6px 0 0;
-}
-
-.settings-panel .repository-result:empty {
-    display: none;
-}
-
-.settings-panel .settings-result {
-    margin: 6px 0 0;
-}
-
-.settings-panel .settings-result:empty {
-    display: none;
-}
-
 /* 341: the theme buttons in one row; the saved one is filled with the accent, like the pressed tag buttons. */
 .settings-panel .theme-choice {
     display: flex;
@@ -1596,10 +1569,6 @@ p.decision-clash button {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: var(--on-accent);
-}
-
-.settings-panel .theme-result:empty {
-    display: none;
 }
 
 .key-details th {
@@ -1771,10 +1740,6 @@ p.decision-clash button {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
     padding-bottom: 12px;
-}
-
-.board-result:empty {
-    display: none;
 }
 
 .board-columns {
@@ -2090,7 +2055,6 @@ nav.saved-searches ul {
     background: color-mix(in srgb, var(--accent-strong) 15%, transparent);
 }
 
-.saved-search-result,
 .saved-searches-unreadable {
     margin: 0 0 8px;
 }
@@ -2213,10 +2177,6 @@ nav.saved-searches ul {
     box-sizing: border-box;
     max-width: 320px;
     width: 100%;
-}
-
-.search-save-result {
-    margin: 6px 0 0;
 }
 
 /* The open subpage's ancestors above the toolbar; long titles are cut, the full name is in the title attribute. */
@@ -2363,14 +2323,6 @@ nav.saved-searches ul {
     color: var(--on-accent);
 }
 
-.triage-status {
-    margin: 0;
-}
-
-.triage-status:empty {
-    display: none;
-}
-
 .settings-panel .mail-digest-line {
     margin-top: 8px;
 }
@@ -2425,15 +2377,6 @@ nav.saved-searches ul {
 .digest-buttons {
     display: flex;
     gap: 6px;
-}
-
-.digest-result {
-    flex: 1 1 100%;
-    margin: 0;
-}
-
-.mail-digest-result:empty {
-    display: none;
 }
 
 /* The weekly review: changed notes, done and overdue todos, and next week's appointments grouped by day. */
@@ -2757,10 +2700,6 @@ nav.saved-searches ul {
     min-width: 0;
 }
 
-.times-today .times-result {
-    margin: 6px 0 0;
-}
-
 .day-appointments .day-appointments-bar {
     align-items: center;
     display: flex;
@@ -3005,13 +2944,6 @@ nav.saved-searches ul {
     flex: none;
 }
 
-.create-note-result {
-    margin: 0 0 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* Job 237: the one-line crash hint over the top of the window, until dismissed. */
 .crash-hint {
     align-items: center;
@@ -3190,14 +3122,6 @@ nav.saved-searches ul {
 
 .pro-entry .pro-remove {
     flex: none;
-}
-
-.settings-panel .pro-result {
-    margin: 6px 0 0;
-}
-
-.settings-panel .pro-result:empty {
-    display: none;
 }
 
 .pro-locked-hint {

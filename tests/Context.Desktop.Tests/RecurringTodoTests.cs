@@ -13,6 +13,11 @@ public sealed class RecurringTodoTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-5: /todo every <unit> <text> adds the todo with the repeat and its first due date.
@@ -147,7 +152,7 @@ public sealed class RecurringTodoTests : IDisposable
             () =>
             {
                 Assert.Empty(cut.FindAll("[role=dialog]"));
-                IElement result = cut.Find(".todos-region p.result");
+                IElement result = Bar.Find(".main-status");
                 Assert.Equal("Done: Water plants. Next due 2026-11-05.", result.TextContent);
                 Assert.True(result.ClassList.Contains("accent"));
                 Assert.Equal(["2026-11-05 Water plants every Thursday"], cut.FindAll("li.todo").Select(Line).ToArray());
@@ -171,7 +176,7 @@ public sealed class RecurringTodoTests : IDisposable
         cut.WaitForAssertion(
             () =>
             {
-                IElement result = cut.Find("p.result");
+                IElement result = Bar.Find(".main-status");
                 Assert.Equal("Done: Stretch. Next due 2026-10-30.", result.TextContent);
                 Assert.True(result.ClassList.Contains("accent"));
                 Assert.Equal(
@@ -183,7 +188,7 @@ public sealed class RecurringTodoTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Done: Buy milk", cut.Find("p.result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Done: Buy milk", data.StatusBar.Text), Wait);
     }
 
     // AC-8: a recurring todo has a span.repeat after its text with the same title; a plain one has none.

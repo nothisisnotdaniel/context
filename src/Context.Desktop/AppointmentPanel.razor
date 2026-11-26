@@ -34,10 +34,6 @@
             </ul>
         </section>
     }
-    @if (topicResult is { Kind: not ActionKind.Done } failed)
-    {
-        <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
-    }
     <MeetingTodosPanel Day="Day" Title="@Title" />
     <h3 id="appointment-notes-heading">Notes</h3>
     @if (view is null)
@@ -82,10 +78,6 @@
                 <button type="button" class="create-note-confirm" disabled="@creating" @onclick="CreateTitled">Create note</button>
                 <button type="button" class="create-note-cancel" disabled="@creating" @onclick="CloseEntry">Cancel</button>
             </div>
-            @if (createFailed is { } failedText)
-            {
-                <p class="red create-note-result" role="status" title="@failedText">@failedText</p>
-            }
         }
     }
     @if (askingTopic is { } topicAsked)
@@ -98,7 +90,8 @@
 @code {
     private AppointmentPageView? view;
     private NoteTopic? askingTopic;
-    private ActionResult? topicResult;
+    // Job 455: the id of the red failed-tick line in the status bar.
+    private long topicId;
     private bool running;
     private (string Title, DateOnly Day)? loaded;
     private int request;
@@ -108,7 +101,8 @@
     private string? newTitle;
     // The appointment whose page the note goes under, fixed when the field opens (job 397).
     private Appointment? newFor;
-    private string? createFailed;
+    // Job 455: the id of the red create-note refusal in the status bar.
+    private long createId;
     private bool creating;
     private bool checkingLink;
     private bool focusField;
@@ -162,9 +156,9 @@
         // Another appointment: its rows are not known yet, so the old ones go.
         loaded = (Title, Day);
         view = null;
-        topicResult = null;
+        Bar.Clear(topicId);
         newTitle = null;
-        createFailed = null;
+        Bar.Clear(createId);
         return Load();
     }
 
@@ -223,7 +217,7 @@
 
         newFor = first ?? StandIn();
         newTitle = MeetingNote.TitlePartFor(newFor);
-        createFailed = null;
+        Bar.Clear(createId);
         focusField = true;
     }
 
@@ -237,7 +231,7 @@
     private void TitleTyped(ChangeEventArgs e)
     {
         newTitle = e.Value?.ToString() ?? string.Empty;
-        createFailed = null;
+        Bar.Clear(createId);
     }
 
     private async Task TitleKey(KeyboardEventArgs e)
@@ -260,7 +254,7 @@
         }
 
         newTitle = null;
-        createFailed = null;
+        Bar.Clear(createId);
         focusLink = true;
     }
 
@@ -285,13 +279,13 @@
 
         if (made.Kind != ActionKind.Done)
         {
-            createFailed = DesktopText.OneLine(made.Text);
+            createId = Bar.Show(DesktopText.OneLine(made.Text), "red");
             focusField = true;
             return;
         }
 
         newTitle = null;
-        createFailed = null;
+        Bar.Clear(createId);
         await OnCreated.InvokeAsync(made.Text);
     }
 
@@ -321,7 +315,8 @@
         running = true;
         try
         {
-            topicResult = await Actions.CompleteTopic(topic, confirmed);
+            ActionResult ticked = await Actions.CompleteTopic(topic, confirmed);
+            topicId = Bar.Update(topicId, ticked.Kind == ActionKind.Done ? string.Empty : DesktopText.OneLine(ticked.Text), "red");
         }
         finally
         {
