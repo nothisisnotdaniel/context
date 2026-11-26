@@ -167,6 +167,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
 - [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
 - [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
+- [stop] Auto stops here
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
 - [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
 - [ ] [#512](backlog/512-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
