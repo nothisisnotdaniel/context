@@ -163,7 +163,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#504](backlog/504-long-lines-wrap-in-code-blocks.md) Long lines wrap in code blocks → 438-code-blocks-wrap.6805ce6deb0f40749187f79a95292a72
 - [x] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks → 447-tab-indents-code-blocks.917164b0c5024f5d8c1ab24596218497
 - [x] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop → 451-pinned-drag-order.428674b500794b029971364936de52ff
-- [ ] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages
+- [x] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages → 455-status-bar-feedback.6ce4016f7e024aa28109de18e4727b3a
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
 - [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
 - [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
