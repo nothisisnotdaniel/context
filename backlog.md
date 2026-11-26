@@ -159,8 +159,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
-- [ ] [#504](backlog/504-long-lines-wrap-in-code-blocks.md) Long lines wrap in code blocks
 - [ ] [#509](backlog/509-paste-pictures-into-notes.md) Paste pictures into notes
+- [ ] [#504](backlog/504-long-lines-wrap-in-code-blocks.md) Long lines wrap in code blocks
 - [ ] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
 - [ ] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop
