@@ -11,7 +11,7 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands, newlineInCode } fr
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema, taskClass } from "./schema.js";
-import { smartPaste, linkMeta, linkTitleTransaction, webLinkContent } from "./paste.js";
+import { smartPaste, linkMeta, linkTitleTransaction, webLinkContent, pastedImages } from "./paste.js";
 import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
 import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
 import { parse, serialize, webHref, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
@@ -101,8 +101,9 @@ export function imageViewTest(editor) {
   return imageView(editor);
 }
 
-// Reads the dropped files (each at most maxAttachmentBytes; a bigger one is not read) and makes one .NET call.
-async function sendDrop(dotnet, files) {
+// Reads the dropped or pasted files (each at most maxAttachmentBytes; a bigger one is not read) and makes one .NET
+// call: OnDrop for a drop, OnPasteImages for pasted pictures (job 435).
+async function sendDrop(dotnet, files, pasted = false) {
   const count = files.length;
   const sent = [];
   if (count <= maxFilesPerDrop) {
@@ -118,7 +119,8 @@ async function sendDrop(dotnet, files) {
       sent.push({ name: file.name, size: file.size, bytes });
     }
   }
-  await dotnet.invokeMethodAsync("OnDrop", count, sent).catch(() => {});
+  const call = pasted ? dotnet.invokeMethodAsync("OnPasteImages", count, sent) : dotnet.invokeMethodAsync("OnDrop", count, sent);
+  await call.catch(() => {});
 }
 
 // What a click at pos of doc opens (job 354): { kind: "attachment", href } for an attachment PDF link (any click),
@@ -1614,6 +1616,15 @@ export function mount(element, markdown, dotnet, images, name) {
       const data = event && event.clipboardData;
       if (!data) {
         return false;
+      }
+      // Pasted pictures (job 435): image files with no text go to .NET like a drop, at the selection start, whether
+      // or not Shift is held; no transaction until .NET answers with insertAttachment.
+      const images = pastedImages(data.files, data.getData("text/plain"));
+      if (images !== null) {
+        event.preventDefault();
+        editor.dropPos = view.state.selection.from;
+        sendDrop(dotnet, images, true);
+        return true;
       }
       const tr = smartPaste(view.state, data.getData("text/plain"), editor.shift && editor.lastKey !== 45);
       if (tr === null) {

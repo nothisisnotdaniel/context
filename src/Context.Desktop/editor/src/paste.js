@@ -12,6 +12,32 @@ const maxRows = 500;
 const maxTabs = 49;
 const maxUrl = 2048;
 
+// The clipboard image types a paste stores as an attachment (job 435); .NET checks the bytes again.
+const pastedImageTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/**
+ * The pasted image files (job 435): those of files (an array or FileList) whose type is PNG, JPEG, GIF or WebP, but only
+ * when the clipboard's text/plain is empty after trimming; null when there is text (an Excel or Word copy that holds a
+ * picture too goes through smart paste), no file, or no file of an allowed type.
+ */
+export function pastedImages(files, text) {
+  if (typeof text === "string" && text.trim().length > 0) {
+    return null;
+  }
+  if (!files || typeof files.length !== "number" || files.length === 0) {
+    return null;
+  }
+  const images = Array.from(files).filter(file => file && pastedImageTypes.includes(file.type));
+  return images.length > 0 ? images : null;
+}
+
+/** Test hook, DOM-free (job 435): pastedImages over a JSON array of { name, type }, as JSON (the picked names or null). */
+export function pastedImagesJson(filesJson, text) {
+  const files = filesJson === null || filesJson === undefined ? null : JSON.parse(String(filesJson));
+  const picked = pastedImages(files, text === null || text === undefined ? text : String(text));
+  return JSON.stringify(picked === null ? null : picked.map(file => file.name));
+}
+
 // The meta a smartPaste transaction carries when it inserted a lone link: the URL.
 export const linkMeta = "contextPastedLink";
 

@@ -4,7 +4,7 @@ import { chipDom, headingDom } from "./schema.js";
 import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, setGlossary, glossaryDecorationsJson, glossaryMetaJson, isDrawingSrc, imageViewTest } from "./view.js";
 import { glossaryMatches } from "./glossary.js";
 import { decisionsJson, decisionReferences, applyDecisionEditsText, withFolderLine, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs } from "./decisions.js";
-import { pastedMarkdown, pastedDocJson, titledMarkdown } from "./paste.js";
+import { pastedMarkdown, pastedDocJson, titledMarkdown, pastedImagesJson } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
 import { setTheme, mermaidTheme } from "./theme.js";
@@ -53,6 +53,8 @@ globalThis.ContextEditor = Object.freeze({
   opensChip,
   pastedMarkdown,
   titledMarkdown,
+  // Pasted pictures (job 435): which clipboard files go to OnPasteImages.
+  pastedImagesJson,
   // Web links (job 354): the one web-link rule, the paste and click hooks and the link's toDOM spec.
   webHref,
   pastedDocJson,

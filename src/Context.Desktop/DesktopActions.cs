@@ -1571,6 +1571,17 @@ internal sealed class DesktopActions
         Run(() => AttachFilesNow(name, count, files), refresh: false);
 
     /// <summary>
+    /// Stores the pictures pasted into the plain note <paramref name="name"/> (job 435) with the <see cref="AttachFiles"/>
+    /// rules (sensitive or missing note, <see cref="NoteAttachments.MaxFilesPerDrop"/>, 10 MB), but under the name
+    /// <c>paste-yyyyMMdd-HHmmss.&lt;ext&gt;</c> from the local clock, the extension taken from the sniffed bytes
+    /// (<c>png</c>, <c>jpg</c>, <c>gif</c>, <c>webp</c>); the clipboard's name is never used. Bytes that are none of these
+    /// four images are refused with <see cref="AttachUnsupportedText"/>. A clash gets <c>-2</c>.. through
+    /// <see cref="NoteAttachments.Add"/>. Never touches the note file or <c>context.db</c> and never refreshes.
+    /// </summary>
+    public Task<ActionResult> PasteImages(string name, int count, IReadOnlyList<DroppedFile> files) =>
+        Run(() => PasteImagesNow(name, count, files), refresh: false);
+
+    /// <summary>
     /// Opens the attachment PDF the link <paramref name="src"/> of the plain note <paramref name="name"/> points to in
     /// the system viewer: <see cref="INoteLauncher.Launch"/> once, only with a path <see cref="NoteAttachments.TryResolve"/>
     /// accepted as a PDF, or (job 384) as an Excalidraw drawing that the note's own text links among its
@@ -4289,7 +4300,54 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult AttachFilesNow(string name, int count, IReadOnlyList<DroppedFile> files)
+    private ActionResult AttachFilesNow(string name, int count, IReadOnlyList<DroppedFile> files) =>
+        AttachEach(name, count, files, AttachOne);
+
+    private ActionResult PasteImagesNow(string name, int count, IReadOnlyList<DroppedFile> files)
+    {
+        string stem = "paste-" + localNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        return AttachEach(name, count, files, (note, file) => PasteOne(note, stem, file));
+    }
+
+    // Job 435: one pasted picture, named from the paste's clock second and its sniffed bytes only.
+    private AttachmentLine PasteOne(string name, string stem, DroppedFile file)
+    {
+        string? extension = file.Bytes is null ? null : PastedExtension(file.Bytes);
+        string shown = extension is null ? stem : stem + "." + extension;
+        if (file.Size > NoteAttachments.MaxBytes || file.Bytes is { LongLength: > NoteAttachments.MaxBytes })
+        {
+            return new AttachmentLine(ActionKind.Refused, AttachTooLargeText(shown));
+        }
+
+        if (file.Bytes is null)
+        {
+            return new AttachmentLine(ActionKind.Failed, AttachFailedText(shown));
+        }
+
+        if (extension is null)
+        {
+            return new AttachmentLine(ActionKind.Refused, AttachUnsupportedText(shown));
+        }
+
+        return AttachOne(name, new DroppedFile(shown, file.Size, file.Bytes));
+    }
+
+    // The extension of a PNG, JPEG, GIF or WebP by its magic bytes (Sniff with each image extension), else null.
+    private static string? PastedExtension(byte[] bytes)
+    {
+        foreach (string extension in (string[])["png", "jpg", "gif", "webp"])
+        {
+            if (NoteAttachments.IsImage(NoteAttachments.Sniff("paste." + extension, bytes)))
+            {
+                return extension;
+            }
+        }
+
+        return null;
+    }
+
+    private ActionResult AttachEach(
+        string name, int count, IReadOnlyList<DroppedFile> files, Func<string, DroppedFile, AttachmentLine> attachOne)
     {
         try
         {
@@ -4314,7 +4372,7 @@ internal sealed class DesktopActions
         List<AttachmentLine> lines = [];
         foreach (DroppedFile file in files)
         {
-            lines.Add(AttachOne(name, file));
+            lines.Add(attachOne(name, file));
         }
 
         bool any = lines.Any(l => l.Kind == ActionKind.Done);

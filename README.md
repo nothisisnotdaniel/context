@@ -227,6 +227,9 @@ becomes `My-Shot-1.png`; a name already taken gets `-2`, `-3` and so on). It ins
 `![shot.png](.attachments/shot.png)` for an image, which shows in the note, and `[plan.pdf](.attachments/plan.pdf)`
 for a PDF, which opens in the system's PDF viewer when you click it. The inserted links are an edit like any other: the
 note saves itself a second later. Sensitive notes can't have attachments.
+You can also paste a picture (a screenshot, a copied image) with Ctrl+V / Cmd+V: it is stored the same way as
+`paste-yyyyMMdd-HHmmss.png` (`.jpg`, `.gif`, `.webp`) and shows at the cursor; a clipboard that also holds text pastes
+the text (manual check: Cmd+Ctrl+Shift+4, then Cmd+V on macOS; Win+Shift+S, then Ctrl+V on Windows).
 
 Moving a note to another level takes the attachments it links along into the new level's `.attachments` folder
 (renamed with `-2` and its links updated when the name is taken there). An attachment that another note in the old
