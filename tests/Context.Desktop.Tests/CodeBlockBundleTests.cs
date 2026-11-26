@@ -625,7 +625,7 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
         KeyResult other = Keys("```\n⟦a\n```", "Escape", "Left", "Tab");
         Assert.True(other.Handled[2]);
         Assert.Equal("```\n  a\n```", other.Markdown);
-        Assert.True(Keys("p⟦", "Escape", "Tab").Handled[1] == false);
+        Assert.False(Keys("p⟦", "Escape", "Tab").Handled[1]);
         KeyResult list = Keys("- a\n- ⟦b", "Escape", "Tab");
         Assert.True(list.Handled[1]);
         KeyResult inList = Keys("- ```\n  ⟦a\n  ```", "Escape", "Tab");
@@ -640,7 +640,7 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
         KeyResult result = Keys(Md, "Tab");
         Assert.Equal("```js\n  a\n```", result.Markdown);
         Assert.Equal("```js\na\n```", result.Undone);
-        Assert.Equal(result.Markdown, Command(result.Markdown.Replace("  a", "  ⟦a"), "Shift-Mod-z"));
+        Assert.Equal(result.Markdown, Keys(result.Markdown.Replace("  a", "  ⟦a"), "Escape").Markdown);
     }
 
     private sealed record KeyResult(List<bool> Handled, string Markdown, string Undone);

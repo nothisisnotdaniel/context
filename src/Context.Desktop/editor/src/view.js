@@ -878,7 +878,7 @@ function touchedLines(state) {
   const result = [];
   for (let i = 0; i < starts.length; i++) {
     const end = i + 1 < starts.length ? starts[i + 1] - 1 : text.length;
-    const touched = empty ? from >= starts[i] && from <= end : starts[i] < to && end >= from && !(starts[i] === to);
+    const touched = empty ? from >= starts[i] && from <= end : starts[i] < to && end >= from;
     if (touched) {
       result.push(starts[i]);
     }
