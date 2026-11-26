@@ -16,3 +16,7 @@ On Windows WebView2 158.0.4370.33 at develop 29b1b32, three displayed 14 px outl
 ## Notes
 
 From delegated Windows check #273. #274 concerns a visible outline heading. The independent placeholder, pin and glossary contrast items concern other controls.
+
+## Folded in from #273 (backlog audit, 2026-11-26)
+
+Check outline link contrast in the right sidebar: Check by hand, in light and dark mode, the contrast of the outline buttons (--accent-strong) on the right sidebar background (--panel), app.css around line 1559. If it is below WCAG AA (4.5:1 for text), pick a colour token that meets it in both themes.

@@ -17,3 +17,7 @@ Windows WebView2 on develop 29b1b32 rendered the empty checkpoint name hint as #
 ## Notes
 
 Found by the delegated #456 manual desktop check. The project selector matches the native People selector and the populated name matches ordinary text inputs. Scope the style change to the weak placeholder foreground. #412 concerns source buttons and the other open contrast checks concern their own controls.
+
+## Folded in from #456 (backlog audit, 2026-11-26)
+
+Check the Times panel's booking fields in dark mode: Look at TimesTodayPanel's select and name input in light and dark mode; add panel styles in app.css if the global form styles don't cover them.

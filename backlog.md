@@ -222,7 +222,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#466](backlog/466-check-desktop-settings-key-details-on.md) Check desktop settings key details on macOS
 - [h] [#467](backlog/467-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows
 - [ ] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
-- [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
 - [x] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
 - [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
@@ -234,19 +233,16 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
 - [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
-- [ ] [#101](backlog/101-work-item-references.md) Work item references
+- [x] [#101](backlog/101-work-item-references.md) Work item references
 - [ ] [#91](backlog/091-windows-device-check-at-open.md) Windows device check at open
 - [ ] [#88](backlog/088-vacation-handover.md) Vacation handover
 - [ ] [#67](backlog/067-email-to-note.md) Email to note
 - [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
 - [ ] [#56](backlog/056-one-project-list.md) One project list
-- [ ] [#42](backlog/042-label-shared-tag-rows.md) Label shared-tag rows
-- [ ] [#41](backlog/041-zone-in-calendarlinkview.md) Zone in CalendarLinkView
 - [ ] [#40](backlog/040-view-doc-tidy-ups.md) View doc tidy-ups
 - [ ] [#39](backlog/039-safe-tostring-on-all-records.md) Safe ToString on all records
 - [ ] [#34](backlog/034-clearer-calendar-display.md) Clearer calendar display
 - [ ] [#20](backlog/020-complete-checks-the-whole-todo.md) Complete checks the whole todo
-- [ ] [#21](backlog/021-test-for-a-todo-removed-elsewhere.md) Test for a todo removed elsewhere
 - [ ] [#22](backlog/022-concurrent-todo-writes.md) Concurrent todo writes
 - [ ] [#30](backlog/030-tag-help-and-input.md) Tag help and input
 - [ ] [#31](backlog/031-limit-current-rows.md) Limit /current rows
@@ -263,8 +259,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#237](backlog/237-code-spans-and-fences-in-tags.md) Code spans and fences in tags, links and mentions
 - [ ] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
 - [ ] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
-- [ ] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
-- [ ] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
 - [ ] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
 - [ ] [#227](backlog/227-template-and-daily-note-messages.md) Template and daily note messages
 - [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
@@ -280,7 +274,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
 - [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
-- [h] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [ ] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
 - [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
@@ -288,7 +281,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 - [ ] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: work item numbers like #1234
 - [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
-- [h] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
 - [ ] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
 - [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
 - [?] [#276](backlog/276-feedback-when-a-day-pick-is.md) Feedback when a day pick is ignored while busy
@@ -299,14 +291,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#284](backlog/284-cap-the-length-of-each-text.md) Cap the length of each text field read from Outlook
 - [?] [#285](backlog/285-don-t-start-a-new-outlook.md) Don't start a new Outlook read while an earlier one hangs
 - [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
-- [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
 - [ ] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
 - [ ] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
 - [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
 - [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
 - [h] [#470](backlog/470-check-right-click-in-a-release.md) Check right click in a Release build on macOS
 - [h] [#471](backlog/471-check-right-click-in-a-release.md) Check right click in a Release build on Windows
-- [h] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
 - [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
 - [ ] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
 - [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
@@ -314,7 +304,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#315](backlog/315-keep-keyboard-focus-after-adding-or.md) Keep keyboard focus after adding or removing an attribute
 - [ ] [#316](backlog/316-add-attributes-to-a-note-that.md) Add attributes to a note that has none
 - [?] [#317](backlog/317-attribute-value-with-a-control-character.md) Attribute value with a control character isn't counted as changed
-- [?] [#318](backlog/318-attribute-values-show-bidi-controls-as.md) Attribute values show bidi controls as placeholders
 - [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
 - [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
 - [x] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test → 246-flaky-palette-tests
@@ -357,8 +346,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#359](backlog/359-refuse-lookalike-spellings-of-the-removed.md) Refuse lookalike spellings of the removed secret options
 - [?] [#360](backlog/360-test-the-full-removed-option-sentence.md) Test the full removed-option sentence in CLAUDE.md
 - [?] [#361](backlog/361-tag-index-explicit-handling-of-a.md) Tag index: explicit handling of a symlinked context.db
-- [?] [#362](backlog/362-notes-refuse-a-note-swapped-for.md) Notes: refuse a note swapped for a symlink between listing and reading
-- [?] [#363](backlog/363-calendar-skip-symlinked-ics-files.md) Calendar: skip symlinked .ics files
 - [?] [#364](backlog/364-times-panel-narrow-the-catch-in.md) Times panel: narrow the catch in DesktopState.TimesNow
 - [?] [#365](backlog/365-pin-icon-contrast-on-the-open.md) Pin icon contrast on the open note row
 - [?] [#366](backlog/366-pinned-list-roll-back-the-in.md) Pinned list: roll back the in-memory change when the file write fails
@@ -373,7 +360,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
 - [?] [#380](backlog/380-mail-digest-hint-under-the-settings.md) Mail digest: hint under the Settings checkbox
 - [?] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
-- [?] [#382](backlog/382-mail-digest-strip-unicode-format-characters.md) Mail digest: strip Unicode format characters from suggestions
 - [?] [#383](backlog/383-mail-digest-keep-read-mail-disabled.md) Mail digest: keep Read mail disabled while a timed-out read still runs
 - [?] [#386](backlog/386-meeting-todos-cap-and-clean-a.md) Meeting todos: cap and clean a stored meeting title on read
 - [?] [#387](backlog/387-meeting-todos-move-focus-to-the.md) Meeting todos: move focus to the meeting picker when Push finds no next meeting
@@ -387,17 +373,16 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#397](backlog/397-notestore-contains-match-unicode-normalised-paths.md) NoteStore.Contains: match Unicode-normalised paths
 - [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
 - [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
-- [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
 - [ ] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
 - [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
 - [x] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
-- [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
+- [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Group counts on the Todos page
 - [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
 - [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
 - [?] [#414](backlog/414-size-and-file-checks-in-the.md) Size and file checks in the dependency list test
 - [?] [#415](backlog/415-name-the-current-theme-when-a.md) Name the current theme when a theme save fails
 - [?] [#420](backlog/420-decision-picker-announces-the-selected-row.md) Decision picker announces the selected row to screen readers
-- [?] [#421](backlog/421-boundedfile-read-refuses-symlinks-and-fifos.md) BoundedFile.Read refuses symlinks and FIFOs
+- [?] [#421](backlog/421-boundedfile-read-refuses-symlinks-and-fifos.md) BoundedFile.Read refuses symlinks
 - [?] [#422](backlog/422-byte-exact-history-checks-in-endday.md) Byte-exact history checks in EndDay and Merge decision tests
 - [?] [#423](backlog/423-tell-the-user-when-a-rename.md) Tell the user when a rename cannot update the title line
 - [?] [#424](backlog/424-refuse-web-links-with-invisible-unicode.md) Refuse web links with invisible Unicode format characters
@@ -409,7 +394,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#430](backlog/430-warn-when-the-todo-archive-nears.md) Warn when the todo archive nears its 20 MB cap
 - [?] [#431](backlog/431-scroll-the-selected-quick-switcher-row.md) Scroll the selected quick switcher row into view
 - [?] [#432](backlog/432-share-the-quick-switcher-and-palette.md) Share the quick switcher and palette CSS
-- [h] [#433](backlog/433-check-focus-after-a-quick-switcher.md) Check focus after a quick switcher pick
 - [?] [#434](backlog/434-share-one-class-for-the-suite.md) Share one class for the Suite Pro entry-row buttons
 - [?] [#435](backlog/435-clear-the-typed-licence-key-after.md) Clear the typed licence key after a refused or failed activation
 - [?] [#436](backlog/436-don-t-follow-a-suitepro-symlink.md) Don't follow a SuitePro symlink when tightening the activation folder
@@ -430,7 +414,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#452](backlog/452-say-when-a-meeting-booking-loses.md) Say when a meeting booking loses its quicklist project
 - [?] [#453](backlog/453-explain-a-changed-meeting-booking-name.md) Explain a changed meeting booking name
 - [?] [#455](backlog/455-strip-leading-unicode-dashes-and-non.md) Strip leading Unicode dashes and non-breaking spaces from Times booking names
-- [h] [#456](backlog/456-check-the-times-panel-s-booking.md) Check the Times panel's booking fields in dark mode
 - [?] [#457](backlog/457-clear-a-stale-times-result-line.md) Clear a stale Times result line when the booking form is cancelled
 - [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
 - [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
@@ -454,7 +437,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
 - [x] [#494](backlog/494-new-notes-can-be-added-after.md) New notes can be added after a note is linked to an appointment → 395-new-note-after-appointment
 - [ ] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview
-- [ ] [#496](backlog/496-make-recentnotesactionstests-open-anyroute-putsitf.md) Make RecentNotesActionsTests.Open_AnyRoute_PutsItFirst_Once reliable
 - [ ] [#497](backlog/497-show-feedback-while-the-appointment-page.md) Show feedback while the appointment page checks for a meeting note
 - [x] [#498](backlog/498-show-the-app-version-and-log.md) Show the app version and log each update check → 396-version-and-update-log
 - [x] [#499](backlog/499-new-notes-from-an-appointment-page.md) New notes from an appointment page go under that appointment → 397-appointment-note-hierarchy
