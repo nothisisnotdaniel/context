@@ -168,6 +168,85 @@ public sealed class PinnedNotesActionsTests : IDisposable
         WaitPinned(cut, "Plan");
     }
 
+    // 451 AC-2: the moved note takes the target's place in pinned.json and State.Pinned; Changed is raised once.
+    [Fact]
+    public async Task MovePinned_WritesTheNewOrder_RaisesChangedOnce()
+    {
+        data.WriteNote("A", "# A\n");
+        data.WriteNote("B", "# B\n");
+        data.WriteNote("C", "# C\n");
+        data.WritePinned("A", "B", "C");
+        await data.RefreshAsync();
+        int changed = 0;
+        data.State!.Changed += () => Interlocked.Increment(ref changed);
+
+        ActionResult result = await data.Actions!.MovePinned("C", "A").WaitAsync(Wait);
+
+        Assert.Equal((ActionKind.Done, ActionReason.None, "C"), (result.Kind, result.Reason, result.Text));
+        Assert.Equal("{\"pinned\":[\"C\",\"A\",\"B\"]}", File.ReadAllText(Path.Combine(data.Root, PinnedNotesStore.FileName)).Trim());
+        Assert.Equal(["C", "A", "B"], data.State.Pinned);
+        Assert.Equal(1, Volatile.Read(ref changed));
+    }
+
+    // 451 AC-3: the same name, or a name that is not pinned, is Done/Unchanged and writes nothing.
+    [Theory]
+    [InlineData("B", "B")]
+    [InlineData("X", "B")]
+    [InlineData("B", "X")]
+    public async Task MovePinned_SameOrUnpinned_Unchanged_NothingWritten(string name, string target)
+    {
+        data.WriteNote("A", "# A\n");
+        data.WriteNote("B", "# B\n");
+        data.WritePinned("A", "B");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.MovePinned(name, target).WaitAsync(Wait);
+
+        Assert.Equal((ActionKind.Done, ActionReason.Unchanged), (result.Kind, result.Reason));
+        Assert.Equal(before, Files());
+        Assert.Equal(["A", "B"], data.State!.Pinned);
+    }
+
+    // 451 AC-4: pinned.json as a folder: Failed/WriteFailed with the write text; the in-memory order stays.
+    [Fact]
+    public async Task MovePinned_WriteFails_Failed_OrderKept()
+    {
+        data.WriteNote("A", "# A\n");
+        data.WriteNote("B", "# B\n");
+        data.WritePinned("A", "B");
+        await data.RefreshAsync();
+        string file = Path.Combine(data.Root, PinnedNotesStore.FileName);
+        File.Delete(file);
+        Directory.CreateDirectory(file);
+
+        ActionResult result = await data.Actions!.MovePinned("B", "A").WaitAsync(Wait);
+
+        Assert.Equal((ActionKind.Failed, ActionReason.WriteFailed), (result.Kind, result.Reason));
+        Assert.Equal("Can't write pinned.json.", result.Text);
+        Assert.Equal(["A", "B"], data.State!.Pinned);
+    }
+
+    // 451 AC-9: the moved order survives a restart: a new state on the same root shows it.
+    [Fact]
+    public async Task MovePinned_Reopen_ShowsTheMovedOrder()
+    {
+        data.WriteNote("A", "# A\n");
+        data.WriteNote("B", "# B\n");
+        data.WriteNote("C", "# C\n");
+        data.WritePinned("A", "B", "C");
+        await data.RefreshAsync();
+        await data.Actions!.MovePinned("A", "C").WaitAsync(Wait);
+
+        using DesktopFixture again = new DesktopFixture(data);
+        IRenderedComponent<NotesPanel> reopened = await again.RenderAsync<NotesPanel>();
+
+        WaitPinned(reopened, "B", "C", "A");
+        Assert.Equal(["B", "C", "A"], again.State!.Pinned);
+    }
+
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+
     private static void WaitPinned<T>(IRenderedComponent<T> cut, params string[] names)
         where T : IComponent =>
         cut.WaitForAssertion(() => Assert.Equal(

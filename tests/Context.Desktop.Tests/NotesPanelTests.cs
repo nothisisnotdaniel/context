@@ -1020,4 +1020,169 @@ public sealed class NotesPanelTests : IDisposable
             ["Plan", "Meetings/Meeting 1"],
             cut.FindAll("ul.recent-notes button.name").Select(b => b.GetAttribute("title")!).ToArray());
     }
+
+    // 451 AC-5: pinned rows are draggable, recent rows are not; dragging C onto A re-renders C, A, B and writes it.
+    [Fact]
+    public async Task Pinned_DragOntoRow_MovesAndWrites()
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WriteNote("C", "c");
+        data.WriteNote("R", "r");
+        data.WriteRecent("R");
+        data.WritePinned("A", "B", "C");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        WaitPinnedOrder(cut, "A", "B", "C");
+
+        Assert.All(cut.FindAll("ul.pinned-notes > li"), li => Assert.Equal("true", li.GetAttribute("draggable")));
+        IElement recent = Assert.Single(cut.FindAll("ul.recent-notes > li"));
+        Assert.Null(recent.GetAttribute("draggable"));
+
+        await PinnedRow(cut, "C").TriggerEventAsync("ondragstart", new DragEventArgs());
+        await PinnedRow(cut, "A").TriggerEventAsync("ondrop", new DragEventArgs());
+
+        WaitPinnedOrder(cut, "C", "A", "B");
+        Assert.Equal(["C", "A", "B"], new PinnedNotesStore(data.Root).Read());
+    }
+
+    // 451 AC-5: a drop with nothing dragged (or after the drag ended) does nothing.
+    [Fact]
+    public async Task Pinned_DropWithoutDrag_NothingChanges()
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WritePinned("A", "B");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        WaitPinnedOrder(cut, "A", "B");
+        SortedDictionary<string, string> before = Files();
+
+        await PinnedRow(cut, "A").TriggerEventAsync("ondrop", new DragEventArgs());
+        await PinnedRow(cut, "B").TriggerEventAsync("ondragstart", new DragEventArgs());
+        await PinnedRow(cut, "B").TriggerEventAsync("ondragend", new DragEventArgs());
+        await PinnedRow(cut, "A").TriggerEventAsync("ondrop", new DragEventArgs());
+
+        Assert.Equal(["A", "B"], PinnedOrder(cut));
+        Assert.Equal(before, Files());
+    }
+
+    // 451 AC-6: Alt+ArrowDown on A moves it below B; Alt+ArrowUp on C moves it above B; each name carries the shortcuts.
+    [Fact]
+    public async Task Pinned_AltArrows_MoveOneRow()
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WriteNote("C", "c");
+        data.WritePinned("A", "B", "C");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        WaitPinnedOrder(cut, "A", "B", "C");
+        Assert.All(
+            cut.FindAll("ul.pinned-notes button.name"),
+            b => Assert.Equal("Alt+ArrowUp Alt+ArrowDown", b.GetAttribute("aria-keyshortcuts")));
+
+        await PinnedName(cut, "A").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowDown", AltKey = true });
+        WaitPinnedOrder(cut, "B", "A", "C");
+        Assert.Equal(["B", "A", "C"], new PinnedNotesStore(data.Root).Read());
+
+        await PinnedName(cut, "C").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
+        WaitPinnedOrder(cut, "B", "C", "A");
+        Assert.Equal(["B", "C", "A"], new PinnedNotesStore(data.Root).Read());
+    }
+
+    // 451 AC-6: Alt+ArrowUp on the first row, Alt+ArrowDown on the last and ArrowDown without Alt change nothing.
+    [Fact]
+    public async Task Pinned_ArrowsAtTheEnds_OrWithoutAlt_NothingChanges()
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WriteNote("C", "c");
+        data.WritePinned("A", "B", "C");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        WaitPinnedOrder(cut, "A", "B", "C");
+        SortedDictionary<string, string> before = Files();
+
+        await PinnedName(cut, "A").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
+        await PinnedName(cut, "C").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowDown", AltKey = true });
+        await PinnedName(cut, "A").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowDown" });
+
+        Assert.Equal(["A", "B", "C"], PinnedOrder(cut));
+        Assert.Equal(before, Files());
+    }
+
+    // 451 AC-7: with an entry that names no note, the key move of B up and the drop of B on A both give B, A, Gone.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pinned_EntryNamingNoNote_KeepsItsPlace(bool drop)
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WritePinned("A", "Gone", "B");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        WaitPinnedOrder(cut, "A", "B");
+
+        if (drop)
+        {
+            await PinnedRow(cut, "B").TriggerEventAsync("ondragstart", new DragEventArgs());
+            await PinnedRow(cut, "A").TriggerEventAsync("ondrop", new DragEventArgs());
+        }
+        else
+        {
+            await PinnedName(cut, "B").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
+        }
+
+        WaitPinnedOrder(cut, "B", "A");
+        Assert.Equal(["B", "A", "Gone"], new PinnedNotesStore(data.Root).Read());
+    }
+
+    // 451 AC-8: a drop or key move that fails to write shows the red result line; the rows keep their order. The next
+    // move that succeeds clears it.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pinned_MoveFails_RedLine_OrderKept(bool drop)
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WritePinned("A", "B");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        WaitPinnedOrder(cut, "A", "B");
+        string file = Path.Combine(data.Root, PinnedNotesStore.FileName);
+        File.Delete(file);
+        Directory.CreateDirectory(file);
+
+        if (drop)
+        {
+            await PinnedRow(cut, "B").TriggerEventAsync("ondragstart", new DragEventArgs());
+            await PinnedRow(cut, "A").TriggerEventAsync("ondrop", new DragEventArgs());
+        }
+        else
+        {
+            await PinnedName(cut, "B").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
+        }
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't write pinned.json.", cut.Find("p.pinned-result").TextContent), Wait);
+        IElement line = cut.Find("p.pinned-result");
+        Assert.True(line.ClassList.Contains("red"));
+        Assert.Equal("status", line.GetAttribute("role"));
+        Assert.Equal(["A", "B"], PinnedOrder(cut));
+        Assert.Equal(["A", "B"], data.State!.Pinned);
+
+        Directory.Delete(file);
+        await PinnedName(cut, "B").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "ArrowUp", AltKey = true });
+
+        WaitPinnedOrder(cut, "B", "A");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("p.pinned-result")), Wait);
+    }
+
+    private static string[] PinnedOrder(IRenderedComponent<NotesPanel> cut) =>
+        cut.FindAll("ul.pinned-notes button.name").Select(b => b.GetAttribute("title")!).ToArray();
+
+    private static void WaitPinnedOrder(IRenderedComponent<NotesPanel> cut, params string[] names) =>
+        cut.WaitForAssertion(() => Assert.Equal(names, PinnedOrder(cut)), Wait);
+
+    private static IElement PinnedRow(IRenderedComponent<NotesPanel> cut, string name) =>
+        cut.Find($"ul.pinned-notes button.name[title='{name}']").ParentElement!;
+
+    private static IElement PinnedName(IRenderedComponent<NotesPanel> cut, string name) =>
+        cut.Find($"ul.pinned-notes button.name[title='{name}']");
 }

@@ -1528,6 +1528,42 @@ internal sealed class DesktopActions
         return new ActionResult(ActionKind.Done, ActionReason.None, name);
     }
 
+    /// <summary>
+    /// Moves the pinned note <paramref name="name"/> to the place of the pinned note <paramref name="target"/>
+    /// (<see cref="PinnedNotes.Move"/>, job 451) and writes <c>pinned.json</c>. Done with the name; Done/
+    /// <see cref="ActionReason.Unchanged"/> when the names are equal or either is not pinned, nothing written. A failed
+    /// write is Failed (<see cref="PinWriteFailedText"/>) and leaves the in-memory order as it was (the file is written
+    /// first). Raises <see cref="DesktopState.Changed"/> after a change; never refreshes.
+    /// </summary>
+    public Task<ActionResult> MovePinned(string name, string target) => Run(() => MovePinnedNow(name, target), refresh: false);
+
+    private ActionResult MovePinnedNow(string name, string target)
+    {
+        lock (pinnedWriteGate)
+        {
+            IReadOnlyList<string> current = state.Pinned;
+            IReadOnlyList<string> next = PinnedNotes.Move(current, name, target);
+            if (next.SequenceEqual(current, StringComparer.Ordinal))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, name);
+            }
+
+            try
+            {
+                pinnedStore.Write(next);
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, PinWriteFailedText);
+            }
+
+            state.ChangePinned(_ => next);
+        }
+
+        state.RaiseChanged();
+        return new ActionResult(ActionKind.Done, ActionReason.None, name);
+    }
+
     // Changes the pinned list after a rename, move, merge or delete (on the action's worker thread) and writes it when
     // it changed. Never throws; a failed write is swallowed and the in-memory list follows the note anyway.
     private void ChangePinned(Func<IReadOnlyList<string>, IReadOnlyList<string>> step)
