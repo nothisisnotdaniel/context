@@ -462,6 +462,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#500](backlog/500-refuse-a-fifo-or-device-node.md) Refuse a FIFO or device node as a log file
 - [ ] [#501](backlog/501-plain-wording-for-a-failed-update.md) Plain wording for a failed update check
 - [ ] [#502](backlog/502-hide-the-home-folder-in-the.md) Hide the home folder in the update log only at a path boundary
+- [?] [#519](backlog/519-check-code-block-wrapping-in-the.md) Check code block wrapping in the desktop app
+- [?] [#520](backlog/520-copy-test-reads-a-rendered-code.md) Copy test reads a rendered code block
 
 ## Dropped with the terminal UI
 
