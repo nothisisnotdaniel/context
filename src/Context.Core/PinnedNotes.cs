@@ -32,6 +32,45 @@ internal static class PinnedNotes
             .Take(MaxCount)
             .ToList();
 
+    /// <summary>
+    /// The list without <paramref name="name"/>, with <paramref name="name"/> put back in at the index
+    /// <paramref name="target"/> had in <paramref name="list"/> (job 451): the moved name takes the target's place, so a
+    /// move down lands after the target and a move up before it. The same list when the two names are equal (ordinal) or
+    /// either is not in the list. Every other entry, also one that names no note, keeps its place relative to the rest.
+    /// </summary>
+    public static IReadOnlyList<string> Move(IReadOnlyList<string> list, string name, string target)
+    {
+        if (string.Equals(name, target, StringComparison.Ordinal))
+        {
+            return list;
+        }
+
+        int from = IndexOf(list, name);
+        int to = IndexOf(list, target);
+        if (from < 0 || to < 0)
+        {
+            return list;
+        }
+
+        List<string> next = [.. list];
+        next.RemoveAt(from);
+        next.Insert(to, list[from]);
+        return next;
+    }
+
+    private static int IndexOf(IReadOnlyList<string> list, string name)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i], name, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>The list without <paramref name="name"/> and every <c>name/…</c> entry.</summary>
     public static IReadOnlyList<string> Removed(IReadOnlyList<string> list, string name) =>
         list.Where(n => !string.Equals(n, name, StringComparison.Ordinal) && !RecentNotes.IsBelow(n, name)).ToList();

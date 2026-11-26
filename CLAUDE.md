@@ -1853,7 +1853,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     `PinnedNotesStore` (`<root>/pinned.json`, `{"pinned":[…]}`), sharing `NameListFile` (in `RecentNotes.cs`) with
     `RecentNotesStore`, so it has the same read and write rules. Rename/move apply `Renamed`, delete/merge `Removed`,
     writing the file only when the list changes (so tests that never pin never see it). `DataWatcher` ignores it; the
-    CLI never names it. `DesktopFixture.WritePinned` seeds the file before the state is built. A whole-folder snapshot that includes `context.db` while panels may still load goes
+    CLI never names it. `DesktopFixture.WritePinned` seeds the file before the state is built. Order (job 451):
+    `PinnedNotes.Move(list, name, target)` puts `name` at the index `target` had (down lands after, up before; same
+    list for equal or unlisted names; entries naming no note keep their relative places); `Actions.MovePinned(name,
+    target)` (`Run`, `refresh: false`, under `pinnedWriteGate`, file first) is Done, Done/Unchanged with nothing written,
+    or Failed/WriteFailed `Can't write pinned.json.`. Each pinned `li` is `draggable="true"` (`dragstart` remembers the
+    rendered name, `dragend` forgets it, `drop` on another pinned row moves; nothing is read from `DataTransfer`);
+    Alt+ArrowUp/Down on a pinned `button.name` (`aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"`) moves it past the
+    visible pinned row above/below. A failed move shows red `p.pinned-result[role=status]` above the pinned list until
+    the next Done move. Recent rows are not draggable. A whole-folder snapshot that includes `context.db` while panels may still load goes
     through `DesktopFixture.SnapshotUnderIndexGate(syncFirst)` (under `IndexGate`; `syncFirst: true` for "before"), since
     reading the file during a panel's index sync fails on macOS. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
     as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with

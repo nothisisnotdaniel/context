@@ -178,4 +178,34 @@ public sealed class PinnedNotesTests : IDisposable
         Assert.Empty(Directory.GetFiles(root));
         Assert.Empty(new PinnedNotesStore(root).Read());
     }
+
+    // 451 AC-1: the moved name takes the target's place: down lands after the target, up before it.
+    [Fact]
+    public void Move_TakesTheTargetsPlace()
+    {
+        string[] list = ["A", "B", "C", "D"];
+
+        Assert.Equal(["B", "C", "A", "D"], PinnedNotes.Move(list, "A", "C"));
+        Assert.Equal(["A", "D", "B", "C"], PinnedNotes.Move(list, "D", "B"));
+        Assert.Equal(["A", "B", "C", "D"], list);
+    }
+
+    // 451 AC-1: the same name, or a name that is not listed (ordinal), returns the input unchanged.
+    [Fact]
+    public void Move_SameOrUnlisted_Unchanged()
+    {
+        string[] list = ["A", "B", "C", "D"];
+
+        Assert.Same(list, PinnedNotes.Move(list, "B", "B"));
+        Assert.Same(list, PinnedNotes.Move(list, "X", "B"));
+        Assert.Same(list, PinnedNotes.Move(list, "B", "X"));
+        Assert.Same(list, PinnedNotes.Move(list, "b", "A"));
+    }
+
+    // 451 AC-1: an entry that names no note keeps its place relative to the others.
+    [Fact]
+    public void Move_EntryNamingNoNote_KeepsItsRelativePlace()
+    {
+        Assert.Equal(["B", "A", "Gone"], PinnedNotes.Move(["A", "Gone", "B"], "B", "A"));
+    }
 }

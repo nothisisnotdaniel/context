@@ -50,12 +50,32 @@
         else
         {
             List<(NoteInfo Note, bool Locked)> pinnedRows = PinnedRows(snapshot);
+            @if (pinnedMoved is { } movedResult)
+            {
+                string movedText = DesktopText.OneLine(movedResult.Text);
+                <p class="pinned-result cut red" role="status" title="@movedText">@movedText</p>
+            }
             @if (pinnedRows.Count > 0)
             {
                 <ul class="note-list pinned-notes" aria-label="Pinned notes">
                     @foreach ((NoteInfo note, bool locked) in pinnedRows)
                     {
-                        @NoteRow(note, locked, true)
+                        // 451: a pinned row can be dragged onto another pinned row, or moved with Alt+ArrowUp/Down
+                        // on its name; only rendered names are used, nothing is read from the DataTransfer.
+                        NoteInfo row = note;
+                        string rowTitle = DesktopText.OneLine(row.Name);
+                        <li class="note" @key="row.Name" draggable="true"
+                            @ondragstart="() => dragged = row.Name" @ondragend="() => dragged = null"
+                            @ondragover:preventDefault @ondrop:preventDefault @ondrop="() => Dropped(row.Name)">
+                            <button type="button" class="name cut" title="@rowTitle" aria-current="@(IsOpen(row) ? "page" : null)"
+                                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @onkeydown="e => PinnedKey(e, row.Name)"
+                                    @onclick="() => OnOpen.InvokeAsync(row.Name)">@NoteLabel(row)</button>
+                            <span class="pin-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Pinned" focusable="false"><title>Pinned</title><path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></span>
+                            @if (locked)
+                            {
+                                <span class="locked grey">locked</span>
+                            }
+                        </li>
                     }
                 </ul>
             }
@@ -65,7 +85,7 @@
                 <ul class="note-list recent-notes" aria-label="Recent notes">
                     @foreach ((NoteInfo note, bool locked) in recentRows)
                     {
-                        @NoteRow(note, locked, false)
+                        @NoteRow(note, locked)
                     }
                 </ul>
             }
@@ -203,29 +223,83 @@
         }
     }
 
-    // One row of the pinned or recent list (jobs 240, 278): the name button (a subpage's parent in grey, not for a
-    // person page, job 338), the pin icon
-    // on a pinned row, and the visible "locked" of a sensitive note.
-    private RenderFragment NoteRow(NoteInfo note, bool locked, bool pinned) => __builder =>
+    // One row of the recent list (jobs 240, 278): the name button and the visible "locked" of a sensitive note. Pinned
+    // rows are drawn in the markup above (job 451) with the same label.
+    private RenderFragment NoteRow(NoteInfo note, bool locked) => __builder =>
     {
         string name = DesktopText.OneLine(note.Name);
-        // 338: a person page is shown flat, without its storage parent people.
-        string? parent = note.Parent is { } rawParent && People.PersonOf(note.Name) is null ? DesktopText.OneLine(rawParent) : null;
-        bool open = string.Equals(note.Name, OpenName, StringComparison.Ordinal);
         <li class="note" @key="note.Name">
-            <button type="button" class="name cut" title="@name" aria-current="@(open ? "page" : null)"
-                    @onclick="() => OnOpen.InvokeAsync(note.Name)">@DesktopText.NoteName(note.Title)@if (parent is not null)
-                {<span class="note-parent">@parent</span>}</button>
-            @if (pinned)
-            {
-                <span class="pin-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Pinned" focusable="false"><title>Pinned</title><path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></span>
-            }
+            <button type="button" class="name cut" title="@name" aria-current="@(IsOpen(note) ? "page" : null)"
+                    @onclick="() => OnOpen.InvokeAsync(note.Name)">@NoteLabel(note)</button>
             @if (locked)
             {
                 <span class="locked grey">locked</span>
             }
         </li>
     };
+
+    // A row's label: the title, then a subpage's parent in grey (not for a person page, job 338).
+    private RenderFragment NoteLabel(NoteInfo note) => __builder =>
+    {
+        // 338: a person page is shown flat, without its storage parent people.
+        string? parent = note.Parent is { } rawParent && People.PersonOf(note.Name) is null ? DesktopText.OneLine(rawParent) : null;
+        @DesktopText.NoteName(note.Title)@if (parent is not null)
+        {<span class="note-parent">@parent</span>}
+    };
+
+    private bool IsOpen(NoteInfo note) => string.Equals(note.Name, OpenName, StringComparison.Ordinal);
+
+    // The pinned row being dragged (451); only names of rendered rows, nothing is read from the DataTransfer.
+    private string? dragged;
+
+    // The last failed pinned move (451), shown red above the pinned list until the next move that succeeds.
+    private ActionResult? pinnedMoved;
+
+    // A drop on a pinned row: the dragged row takes its place. A drop with nothing dragged does nothing.
+    private async Task Dropped(string target)
+    {
+        if (dragged is not { } name)
+        {
+            return;
+        }
+
+        dragged = null;
+        ShowMoved(await Actions.MovePinned(name, target));
+    }
+
+    // Alt+ArrowUp/Down on a pinned row's name: moves the row past the visible pinned row above or below (to that row's
+    // place, so a hidden entry in between keeps its place relative to the rest); nothing at either end and without Alt.
+    private async Task PinnedKey(KeyboardEventArgs e, string name)
+    {
+        if (!e.AltKey || e.CtrlKey || e.MetaKey || e.ShiftKey || Snapshot is not { } snapshot)
+        {
+            return;
+        }
+
+        int step = e.Key switch
+        {
+            "ArrowUp" => -1,
+            "ArrowDown" => 1,
+            _ => 0,
+        };
+        if (step == 0)
+        {
+            return;
+        }
+
+        List<string> visible = PinnedRows(snapshot).Select(r => r.Note.Name).ToList();
+        int index = visible.FindIndex(n => string.Equals(n, name, StringComparison.Ordinal));
+        int other = index + step;
+        if (index < 0 || other < 0 || other >= visible.Count)
+        {
+            return;
+        }
+
+        ShowMoved(await Actions.MovePinned(name, visible[other]));
+    }
+
+    // A failed move stays shown until the next Done move clears it.
+    private void ShowMoved(ActionResult result) => pinnedMoved = result.Kind == ActionKind.Done ? null : result;
 
     // Every plain and sensitive note by its exact full name, with whether it is sensitive. Nothing is read from disk.
     private static Dictionary<string, (NoteInfo Note, bool Locked)> KnownNotes(DesktopSnapshot snapshot)
