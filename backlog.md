@@ -164,6 +164,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks → 447-tab-indents-code-blocks.917164b0c5024f5d8c1ab24596218497
 - [x] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop → 451-pinned-drag-order.428674b500794b029971364936de52ff
 - [x] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages → 455-status-bar-feedback.6ce4016f7e024aa28109de18e4727b3a
+- [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
 - [ ] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
 - [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
@@ -434,7 +435,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#490](backlog/490-attendees-by-role-on-the-appointment.md) Attendees by role on the appointment page
 - [ ] [#491](backlog/491-earlier-meetings-of-a-series-on.md) Earlier meetings of a series on the appointment page
 - [ ] [#492](backlog/492-import-a-logseq-graph.md) Import a LogSeq graph
-- [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
 - [x] [#494](backlog/494-new-notes-can-be-added-after.md) New notes can be added after a note is linked to an appointment → 395-new-note-after-appointment
 - [ ] [#497](backlog/497-show-feedback-while-the-appointment-page.md) Show feedback while the appointment page checks for a meeting note
 - [x] [#498](backlog/498-show-the-app-version-and-log.md) Show the app version and log each update check → 396-version-and-update-log
