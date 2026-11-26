@@ -1610,8 +1610,6 @@ export function mount(element, markdown, dotnet, images, name) {
       }
       return true;
     },
-    // Pasted pictures (job 435): image files with no text go to .NET like a drop, at the selection start, whether or
-    // not Shift is held; no transaction until .NET answers with insertAttachment.
     // Smart paste (paste.js): a table or a lone link gets its own transaction; anything else, and every
     // Ctrl/Cmd+Shift+V (plain, told the way ProseMirror tells it: Shift held, the key not Insert), takes the default.
     handlePaste(view, event) {
@@ -1619,6 +1617,8 @@ export function mount(element, markdown, dotnet, images, name) {
       if (!data) {
         return false;
       }
+      // Pasted pictures (job 435): image files with no text go to .NET like a drop, at the selection start, whether
+      // or not Shift is held; no transaction until .NET answers with insertAttachment.
       const images = pastedImages(data.files, data.getData("text/plain"));
       if (images !== null) {
         event.preventDefault();
