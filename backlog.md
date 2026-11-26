@@ -435,7 +435,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
 - [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
 - [?] [#460](backlog/460-refuse-case-only-clashes-on-case.md) Refuse case-only clashes on case-sensitive file systems in import save
-- [?] [#461](backlog/461-fixed-order-for-import-refusal-texts.md) Fixed order for import refusal texts
 - [ ] [#477](backlog/477-calendar-markers-for-notes-and-appointments.md) Calendar markers for notes and appointments (after: #476)
 - [ ] [#478](backlog/478-focus-mode-for-writing.md) Focus mode for writing
 - [ ] [#479](backlog/479-active-status-and-priority-for-todos.md) Active status and priority for todos
