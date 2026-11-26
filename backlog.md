@@ -447,6 +447,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#522](backlog/522-drag-cursor-and-drop-indicator-for.md) Drag cursor and drop indicator for pinned notes
 - [?] [#524](backlog/524-clear-old-status-bar-messages.md) Clear old status bar messages (after: #506)
 - [?] [#525](backlog/525-make-timing-and-jint-bundle-tests.md) Make timing and Jint bundle tests reliable under load
+- [ ] [#526](backlog/526-skip-the-ci-tests-for-backlog.md) Skip the CI tests for backlog and lessons changes (after: factory#85)
 
 ## Dropped with the terminal UI
 
