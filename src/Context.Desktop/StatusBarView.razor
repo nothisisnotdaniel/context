@@ -3,8 +3,12 @@
    message as one span.line per line). *@
 @implements IDisposable
 
+@{
+    // One read per render, so a change between reads never draws a mix of two messages.
+    StatusBar.Message shown = Bar.Current;
+}
 <footer class="status-bar">
-    @if (Bar.Lines is { Count: > 0 } lines)
+    @if (shown.Lines is { Count: > 0 } lines)
     {
         <p class="main-status cut" role="status" title="@string.Join(" ", lines.Select(l => l.Text))">
             @foreach ((string text, string css) in lines)
@@ -15,7 +19,7 @@
     }
     else
     {
-        <p class="main-status cut @Bar.Css" role="status" title="@Bar.Text">@Bar.Text</p>
+        <p class="main-status cut @shown.Css" role="status" title="@shown.Text">@shown.Text</p>
     }
 </footer>
 
@@ -23,13 +27,31 @@
     [Inject]
     internal StatusBar Bar { get; set; } = null!;
 
+    private volatile bool disposed;
+
     public void Dispose()
     {
+        disposed = true;
         Bar.Changed -= OnChanged;
         GC.SuppressFinalize(this);
     }
 
     protected override void OnInitialized() => Bar.Changed += OnChanged;
 
-    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnChanged()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The view was removed while a message changed; nothing left to draw.
+        }
+    }
 }
