@@ -283,6 +283,47 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
         Assert.All(result.RootElement.GetProperty("texts").EnumerateArray(), t => Assert.Equal(Text, t.GetString()));
     }
 
+    // 438 AC-1, AC-2: long code lines wrap in the source and in the committed bundle's CSS; no horizontal scroll bar.
+    [Theory]
+    [InlineData("src")]
+    [InlineData("bundle")]
+    public void CodeBlocks_Wrap_InSourceAndBundle(string which)
+    {
+        string desktop = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder);
+        string path = which == "src"
+            ? Path.Combine(desktop, "editor", "src", "editor.css")
+            : Path.Combine(desktop, "wwwroot", "editor", "editor.css");
+        string css = File.ReadAllText(path);
+
+        Match code = Regex.Match(css, @"\.note-editor-body pre > code\s*\{([^}]*)\}");
+        Assert.True(code.Success);
+        Assert.Matches(@"white-space:\s*pre-wrap", code.Groups[1].Value);
+        Assert.Matches(@"overflow-wrap:\s*(anywhere|break-word)", code.Groups[1].Value);
+        Match pre = Regex.Match(css, @"\.note-editor-body pre\s*\{([^}]*)\}");
+        Assert.True(pre.Success);
+        Assert.DoesNotMatch(@"overflow-x:\s*auto", pre.Groups[1].Value);
+    }
+
+    // 438 AC-4: wrapping is display only: a long line and an indented line round-trip byte for byte, and Copy gets them whole.
+    [Fact]
+    public void CodeBlock_LongAndIndentedLines_RoundTripAndCopyUnchanged()
+    {
+        string longLine = new('x', 500);
+        string markdown = "```\n" + longLine + "\n    indented\n\ttabbed\n```";
+
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+
+        string text = longLine + "\n    indented";
+        using JsonDocument result = JsonDocument.Parse(bundle.Settled($$"""
+            (() => {
+              const texts = [];
+              return ContextEditor.copyText({{Js(text)}}, { writeText: t => { texts.push(t); return Promise.resolve(); } })
+                .then(() => JSON.stringify({ texts }));
+            })()
+            """));
+        Assert.Equal(text, result.RootElement.GetProperty("texts")[0].GetString());
+    }
+
     // AC-10: inline code and code blocks use the monospace stack on --code-bg, the hljs classes are coloured through
     // --code-* variables, and every --code-* variable editor.css uses is defined in app.css's light and dark blocks.
     [Fact]

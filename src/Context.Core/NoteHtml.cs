@@ -28,7 +28,7 @@ internal static class NoteHtml
         + "p, ul, ol, blockquote, pre { margin: 0 0 1rem; }\n"
         + "blockquote { border-left: 0.25rem solid #d0d7de; color: #57606a; margin-left: 0; padding: 0 1rem; }\n"
         + "code { font-family: ui-monospace, Menlo, Consolas, monospace; background: #f6f8fa; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }\n"
-        + "pre { background: #f6f8fa; padding: 0.75rem 1rem; overflow-x: auto; border-radius: 0.3rem; }\n"
+        + "pre { background: #f6f8fa; padding: 0.75rem 1rem; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 0.3rem; }\n"
         + "pre code { padding: 0; background: none; }\n"
         + "img { max-width: 100%; }\n"
         + "@media print { body { margin: 0; max-width: none; } }\n";

@@ -11,6 +11,20 @@ public sealed class NoteHtmlTests
 
     private static readonly Func<string, ResolvedAttachment?> NoImages = _ => null;
 
+    // 438 AC-3: long lines in a fenced block wrap on the shared page; no horizontal scroll bar on pre.
+    [Fact]
+    public void Render_CodeBlock_PreWraps()
+    {
+        string html = NoteHtml.Render("Note", "```\n" + new string('x', 500) + "\n```\n", NoImages, leaveOutPrivate: true);
+
+        System.Text.RegularExpressions.Match pre = System.Text.RegularExpressions.Regex.Match(html, @"(?m)^pre \{([^}]*)\}");
+        Assert.True(pre.Success);
+        Assert.Contains("white-space: pre-wrap", pre.Groups[1].Value, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere", pre.Groups[1].Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("overflow-x", pre.Groups[1].Value, StringComparison.Ordinal);
+        Assert.Contains(new string('x', 500), html, StringComparison.Ordinal);
+    }
+
     // AC-1: the page's frame: doctype, charset, the CSP, the encoded title, one inline style and no script.
     [Fact]
     public void Render_Page_HasDoctypeCharsetCspTitleAndOneStyle()
