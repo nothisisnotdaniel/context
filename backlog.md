@@ -162,8 +162,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#509](backlog/509-paste-pictures-into-notes.md) Paste pictures into notes
 - [ ] [#504](backlog/504-long-lines-wrap-in-code-blocks.md) Long lines wrap in code blocks
 - [ ] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks
-- [ ] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages
 - [ ] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop
+- [ ] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
 - [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
 - [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
