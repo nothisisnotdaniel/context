@@ -185,6 +185,13 @@
     [Parameter]
     public EventCallback<DroppedFiles> OnAttach { get; set; }
 
+    /// <summary>
+    /// Called once per paste of pictures into the editor (job 435); the parent stores them and calls
+    /// <see cref="ShowAttachedAsync"/>.
+    /// </summary>
+    [Parameter]
+    public EventCallback<DroppedFiles> OnPasteImages { get; set; }
+
     /// <summary>Called with the href of a clicked attachment PDF link; the parent opens it.</summary>
     [Parameter]
     public EventCallback<string> OnOpenAttachment { get; set; }
@@ -494,6 +501,7 @@
         Interop.PersonClicked -= PersonClicked;
         Interop.DirtyChanged -= DirtyChanged;
         Interop.FilesDropped -= FilesDropped;
+        Interop.ImagesPasted -= ImagesPasted;
         Interop.AttachmentClicked -= AttachmentClicked;
         Interop.WebLinkClicked -= WebLinkClicked;
         Interop.LinkPasted -= LinkPasted;
@@ -532,6 +540,7 @@
             Interop.PersonClicked += PersonClicked;
             Interop.DirtyChanged += DirtyChanged;
             Interop.FilesDropped += FilesDropped;
+            Interop.ImagesPasted += ImagesPasted;
             Interop.AttachmentClicked += AttachmentClicked;
             Interop.WebLinkClicked += WebLinkClicked;
             Interop.LinkPasted += LinkPasted;
@@ -1284,6 +1293,9 @@
 
     // A drop goes to the parent, which stores the files (the action refuses a sensitive note).
     private Task FilesDropped(DroppedFiles dropped) => InvokeAsync(() => OnAttach.InvokeAsync(dropped));
+
+    // Pasted pictures go to the parent the same way (job 435).
+    private Task ImagesPasted(DroppedFiles pasted) => InvokeAsync(() => OnPasteImages.InvokeAsync(pasted));
 
     private Task AttachmentClicked(string href) => InvokeAsync(() => OnOpenAttachment.InvokeAsync(href));
 

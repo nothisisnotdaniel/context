@@ -1346,7 +1346,7 @@ public sealed class DesktopSourceTests
     }
 
     // 094 AC-9: the [JSInvokable] methods only raise EditorInterop's events; none calls Actions or DesktopActions.
-    // 156 AC-10: OnPerson is one more of them. 177 AC-6, AC-9: OnDrop and OnAttachment too. 244 AC-4: OnPasteLink too.
+    // 156 AC-10: OnPerson is one more of them. 177 AC-6, AC-9: OnDrop and OnAttachment too. 244 AC-4: OnPasteLink too. 435: OnPasteImages too.
     [Fact]
     public void JSInvokable_MethodsChangeNothing()
     {
@@ -1357,9 +1357,9 @@ public sealed class DesktopSourceTests
 
         // 203: OnChanged (no parameters) only raises Changed; the editor decides when to save.
         Assert.Equal(
-            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnWebLink", "OnChanged", "OnPasteLink"],
+            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnPasteImages", "OnAttachment", "OnWebLink", "OnChanged", "OnPasteLink"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(12, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(13, Regex.Matches(text, @"\[JSInvokable").Count);
         // 354: OnWebLink only raises WebLinkClicked.
         Assert.Contains("public Task OnWebLink(string href) => WebLinkClicked?.Invoke(href) ?? Task.CompletedTask;", text, StringComparison.Ordinal);
 
@@ -1379,7 +1379,7 @@ public sealed class DesktopSourceTests
         Assert.DoesNotMatch(@"\bActions\b|DesktopActions", unix);
         Assert.All(invokable, m => Assert.Matches(
             @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
-            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|WebLinkClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
+            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|ImagesPasted\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|WebLinkClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(
             "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
@@ -1434,7 +1434,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["DecisionPicks", "OnAttachment", "OnChanged", "OnCopiedDecision", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag", "OnWebLink"],
+            ["DecisionPicks", "OnAttachment", "OnChanged", "OnCopiedDecision", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteImages", "OnPasteLink", "OnPerson", "OnTag", "OnWebLink"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 

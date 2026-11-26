@@ -153,7 +153,7 @@
                         int shownEditor = editorGeneration;
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" Decision="@openDecision" OnOpenDecision="OpenDecision" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
-                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" OnOpenWebLink="OpenWebLink"
+                                    OnAttach="AttachDropped" OnPasteImages="AttachPasted" OnOpenAttachment="OpenAttachment" OnOpenWebLink="OpenWebLink"
                                     OnOutline="OutlineReport(shownEditor)" />
                         @* 338: a person page is a flat page, so it shows no Subpages section. *@
                         @if (People.PersonOf(name) is null && Children(Snapshot, name) is { Count: > 0 } children)
@@ -2741,6 +2741,21 @@ else
         }
 
         ActionResult attached = await Actions.AttachFiles(name, dropped.Count, dropped.Files);
+        if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+        {
+            await editor.ShowAttachedAsync(attached);
+        }
+    }
+
+    // The editor's pasted pictures (job 435): stored as paste-<time>.<ext> next to the open note, then inserted (unsaved).
+    private async Task AttachPasted(DroppedFiles pasted)
+    {
+        if (openName is not { } name)
+        {
+            return;
+        }
+
+        ActionResult attached = await Actions.PasteImages(name, pasted.Count, pasted.Files);
         if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
         {
             await editor.ShowAttachedAsync(attached);

@@ -71,7 +71,7 @@ public sealed record InlineImage
 /// <c>ContextEditor</c>) for one host element and passes its tag, link and mention clicks and its dirty flips back as
 /// events. It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
 /// <see cref="LinkClicked"/>, <see cref="PersonClicked"/>, <see cref="DirtyChanged"/>, <see cref="FilesDropped"/>,
-/// <see cref="AttachmentClicked"/>, <see cref="WebLinkClicked"/>, <see cref="LinkPasted"/>, <see cref="DecisionClicked"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
+/// <see cref="ImagesPasted"/>, <see cref="AttachmentClicked"/>, <see cref="WebLinkClicked"/>, <see cref="LinkPasted"/>, <see cref="DecisionClicked"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
 /// </summary>
 internal sealed class EditorInterop
 {
@@ -107,6 +107,9 @@ internal sealed class EditorInterop
 
     /// <summary>Raised once per drop of files onto the editor.</summary>
     public event Func<DroppedFiles, Task>? FilesDropped;
+
+    /// <summary>Raised once per paste of pictures into the editor (job 435; raw, untrusted: .NET sniffs the bytes).</summary>
+    public event Func<DroppedFiles, Task>? ImagesPasted;
 
     /// <summary>Raised with the href of a clicked attachment PDF link, as written (<c>.attachments/x.pdf</c>).</summary>
     public event Func<string, Task>? AttachmentClicked;
@@ -296,6 +299,11 @@ internal sealed class EditorInterop
     [JSInvokable]
     public Task OnDrop(int count, DroppedFile[] files) =>
         FilesDropped?.Invoke(new DroppedFiles(count, files)) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor once per paste of pictures (job 435): the number pasted and the files (none over the limit).</summary>
+    [JSInvokable]
+    public Task OnPasteImages(int count, DroppedFile[] files) =>
+        ImagesPasted?.Invoke(new DroppedFiles(count, files)) ?? Task.CompletedTask;
 
     /// <summary>Called by the editor when an attachment PDF link is clicked.</summary>
     [JSInvokable]
