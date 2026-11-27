@@ -731,7 +731,8 @@ internal sealed class DesktopState
 
     /// <summary>
     /// The person page of <paramref name="name"/> (<see cref="PersonView.Build"/>): the notes that mention the person,
-    /// their appointments from the calendar files and the cached published calendar, and their open and done todos, after syncing the index, off
+    /// their appointments from the calendar files and the cached published calendar, their open and done todos and the
+    /// open note todos that mention them (job 487), after syncing the index, off
     /// the calling thread. Reads only (no download) and never throws: any failure gives a <c>NoMentions</c> view with
     /// <see cref="PersonView.IndexUnreadable"/> set.
     /// </summary>

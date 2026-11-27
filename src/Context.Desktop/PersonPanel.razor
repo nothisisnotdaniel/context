@@ -2,7 +2,8 @@
 @* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...], the
    appointments from the calendar files and the cached published calendar that mention them or list them as an
    attendee, then the open topics for the next 1:1 (job 253, each with a checkbox that ticks it off in its note after a
-   confirmation), the waiting-for todos and the open and the done todos that mention them, with one red line above them per alias on the page
+   confirmation), the waiting-for todos, the open todos, the open note todos (job 487: `- { }` lines, each with its
+   note's name opening the note, no checkbox) and the done todos that mention them, with one red line above them per alias on the page
    that links to no one or to another person. It reads only (no download), and reloads whenever the state changes. *@
 
 <section class="person-panel" aria-label="Person">
@@ -99,6 +100,25 @@
                     }
                 </ul>
             }
+            @if (view.NoteTodos.Count > 0)
+            {
+                <h2>Todos in notes</h2>
+                <ul class="person-todos note-todos">
+                    @foreach (NoteTodo todo in view.NoteTodos)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        string noteName = DesktopText.OneLine(todo.Note);
+                        <li class="person-todo note-todo">
+                            @if (todo.Due is { } due)
+                            {
+                                <span class="date grey">@due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            }
+                            @TodoText(text)
+                            <button type="button" class="todo-note cut" title="@noteName" @onclick="() => OnOpen.InvokeAsync(todo.Note)">@noteName</button>
+                        </li>
+                    }
+                </ul>
+            }
             @if (view.DoneTodos.Count > 0)
             {
                 <h2>Done todos</h2>
@@ -148,6 +168,35 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
+    /// <summary>Called with the normalized name of a person mention clicked in a note todo's text.</summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
+
+    // A note todo's one-line text (job 487), like TodoPanel's: a mention is a button that opens the person's page.
+    private RenderFragment TodoText(string text) => __builder =>
+    {
+        IReadOnlyList<PersonSegment> segments = PersonParser.Segments(text);
+        <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
+            {
+                @foreach (PersonSegment segment in segments)
+                {
+                    @if (segment.Name is { } mentioned)
+                    {
+                        <button type="button" class="mention" title="@segment.Text"
+                                @onclick="() => OnPerson.InvokeAsync(mentioned)"
+                                @onclick:preventDefault="true" @onclick:stopPropagation="true">@segment.Text</button>
+                    }
+                    else
+                    {
+                        <span class="plain">@segment.Text</span>
+                    }
+                }
+            }
+            else
+            {
+                @text
+            }</span>
+    };
 
     // The open topics (job 253): a checkbox asks first, the text, and the note's name opening the note.
     private RenderFragment TopicsSection(PersonView shown) => __builder =>

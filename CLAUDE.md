@@ -83,7 +83,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `TodoPanel` draws each mention as `<button class="mention">` (raw text, full text in `title`) inside the todo's
     `<label>`, click stopped there; `OnPerson` (normalized name) goes to `Main.OpenMention`. `PersonPanel` adds
     `Open todos` (due, text) and `Done todos` (done date, text), each only when non-empty, no checkboxes; the red
-    `Can't read the todos.` line for a bad `todos.json`; the red `p.todo-archive-unreadable` `Can't read the todo archive.` for a bad archive; empty line `No notes, appointments or todos mention <name>.`
+    `Can't read the todos.` line for a bad `todos.json`; (job 487) `PersonView.NoteTodos` holds the open note todos
+    (`index.NoteTodos()`, the person's own page included) whose text mentions the person (`Holds`), by due (undated
+    last), note ignoring case, ordinal, line, empty when the index can't be read, counted for `Kind`; the red `p.todo-archive-unreadable` `Can't read the todo archive.` for a bad archive; empty line `No notes, appointments or todos mention <name>.`
     The editor shows a mention as a `mention` chip; following it calls
     `DesktopActions.OpenPerson`, which creates `people` (`# people\n`) and the page (`CreateChild`) only on that click,
     and refuses when the top-level `people` is sensitive. The new page gets the `person` type's template
@@ -1538,7 +1540,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     rows meanwhile; a result for another note or an older request is dropped.
     `PersonPanel` (job 156) sits above `LinksPanel` on a person page (`People.PersonOf(name)`) and lists
     `DesktopState.Person(name)` (`PersonView.Build`): `Mentioned in` note buttons (through `RequestOpen`) and
-    `Appointments` (date, time text, one-line title and location), then (job 159) `Open todos` and `Done todos`; grey
+    `Appointments` (date, time text, one-line title and location), then (job 159) `Open todos` and `Done todos`, between them (job 487)
+    `Todos in notes` (`ul.person-todos.note-todos`, `li.person-todo.note-todo`: date only when dated, text with
+    `button.mention` calling `OnPerson` → `Main.OpenMention`, `button.todo-note` opening the note, no checkbox); grey
     `No notes, appointments or todos mention <name>.`, red `Can't read the mentions.`, red `Can't read the todos.`; above all rows (once loaded, in every state) one red `p.alias-clash` (`role="status"`) line per
     `PersonView.AliasClashes` entry; it follows the same read-only, `indexGate`, reload and stale-result rules. A
     mention chip calls `OnPerson`; `Main` (asking first when dirty) calls `DesktopActions.OpenPerson` and opens the
