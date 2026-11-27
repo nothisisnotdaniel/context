@@ -454,6 +454,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#530](backlog/530-check-long-note-names-in-person.md) Check long note names in person-page note todos by eye
 - [?] [#531](backlog/531-test-the-case-only-note-name.md) Test the case-only note-name tie-break of person note todos
 - [?] [#532](backlog/532-test-control-characters-in-note-names.md) Test control characters in note names on the person page
+- [?] [#533](backlog/533-check-the-six-notes-bar-buttons.md) Check the six notes-bar buttons in the narrowest sidebar by eye
 
 ## Dropped with the terminal UI
 
