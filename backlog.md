@@ -180,6 +180,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
 - [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
 - [ ] [#229](backlog/229-note-tree-operation-fixes.md) Note tree operation fixes
+- [stop] Auto stops here
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
 - [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
 - [ ] [#512](backlog/512-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
