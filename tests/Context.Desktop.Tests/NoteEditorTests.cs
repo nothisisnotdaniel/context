@@ -512,6 +512,33 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("Plan", title.GetAttribute("title"));
     }
 
+    // 489 AC-5: the sticky bar's markup is unchanged: div.editor-bar is a direct child of section.note-editor and holds
+    // the title, the dirty dot and the format bar; the attribute box and the editor host follow it as siblings.
+    [Fact]
+    public async Task EditorBar_StickyMarkup_BarThenAttributesThenHost()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n\nBody\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+        await cut.InvokeAsync(() => PageOf(cut).OnDirty(true));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".dirty-dot")), Wait);
+
+        Assert.Single(cut.FindAll("div.editor-host"));
+        Assert.Empty(cut.FindAll("p.editor-failed"));
+        IElement section = cut.Find("section.note-editor");
+        IElement bar = Assert.Single(cut.FindAll("div.editor-bar"));
+        Assert.Equal(("SECTION", "note-editor"), (bar.ParentElement!.TagName, bar.ParentElement.ClassName));
+        Assert.Equal(
+            ["H2.note-title cut", "SPAN.dirty-dot", "DIV.format-bar"],
+            bar.Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
+        Assert.Equal(
+            ["DIV.editor-bar", "DETAILS.note-attributes", "DIV.editor-host"],
+            section.Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
+        Assert.Empty(bar.QuerySelectorAll(".note-attributes, .editor-host"));
+    }
+
     // 141 AC-3: a successful save (SaveAsync, as /save, or Ctrl/Cmd+S) removes the dot at once; the mocked page never
     // calls back.
     [Theory]
