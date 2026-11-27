@@ -64,7 +64,7 @@ public sealed class CrashHintBarTests : IDisposable
         RegisterHint();
         IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
 
-        await cut.Find(".crash-hint-dismiss").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".crash-hint-dismiss");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".crash-hint")), Wait);
         Assert.Empty(data.Launcher.Launched);
@@ -77,7 +77,7 @@ public sealed class CrashHintBarTests : IDisposable
         RegisterHint();
         IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
 
-        await cut.Find(".crash-hint-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".crash-hint-open");
 
         Assert.Equal([Folder], data.Launcher.Launched);
         Assert.Empty(cut.FindAll(".crash-hint .red"));
@@ -92,7 +92,7 @@ public sealed class CrashHintBarTests : IDisposable
         RegisterHint();
         IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
 
-        await cut.Find(".crash-hint-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".crash-hint-open");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't open the folder.", cut.Find(".crash-hint .red").TextContent), Wait);
         Assert.Equal([Folder], data.Launcher.Launched);
@@ -108,7 +108,7 @@ public sealed class CrashHintBarTests : IDisposable
         File.WriteAllText(Folder, "not a folder");
         IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
 
-        await cut.Find(".crash-hint-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".crash-hint-open");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't open the folder.", cut.Find(".crash-hint .red").TextContent), Wait);
         Assert.Empty(data.Launcher.Launched);
@@ -134,7 +134,7 @@ public sealed class CrashHintBarTests : IDisposable
 
         IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
 
-        await cut.Find(".crash-hint-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".crash-hint-open");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't open the folder.", cut.Find(".crash-hint .red").TextContent), Wait);
         Assert.Empty(data.Launcher.Launched);

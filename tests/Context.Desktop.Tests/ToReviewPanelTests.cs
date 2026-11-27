@@ -103,7 +103,7 @@ public sealed class ToReviewPanelTests : IDisposable
         IRenderedComponent<ToReviewPanel> cut = await Render();
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.review-item")), Wait);
 
-        await cut.Find("button.review-note").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.review-note");
 
         Assert.Equal(["Plan"], opened);
     }
@@ -118,7 +118,7 @@ public sealed class ToReviewPanelTests : IDisposable
         IRenderedComponent<ToReviewPanel> cut = await Render();
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.review-item")), Wait);
 
-        await cut.Find(button).ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, button);
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("li.review-item")), Wait);
         Assert.Equal(expected, File.ReadAllText(PathOf("Plan")));
@@ -134,10 +134,10 @@ public sealed class ToReviewPanelTests : IDisposable
         IRenderedComponent<ToReviewPanel> cut = await Render();
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("li.review-item").Count), Wait);
 
-        await Item(cut, "Plan").QuerySelector("button.review-remove")!.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => Item(cut, "Plan").QuerySelector("button.review-remove")!, e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal("Remove the review date from Plan?", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Remove", cut.Find("[role=dialog] button.confirm").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.review-item")), Wait);
         Assert.Equal("Other", cut.Find("button.review-note").TextContent);
@@ -155,12 +155,12 @@ public sealed class ToReviewPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.review-item")), Wait);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find("button.review-remove").ClickAsync(new MouseEventArgs());
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.review-remove");
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
-        await cut.Find("button.review-remove").ClickAsync(new MouseEventArgs());
-        await cut.Find("[role=dialog]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.ClickAsync(cut, "button.review-remove");
+        await StaleClick.KeyDownAsync(cut, "[role=dialog]", new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
@@ -177,7 +177,7 @@ public sealed class ToReviewPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.review-item")), Wait);
         data.WriteNote("Plan", "x\nreview:2026-10-01\n");
 
-        await cut.Find("button.review-3m").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.review-3m");
 
         Bar.WaitForAssertion(() => Assert.Equal("red", data.StatusBar.Css), Wait);
         Assert.Empty(cut.FindAll("p.review-result"));
@@ -201,7 +201,7 @@ public sealed class ToReviewPanelTests : IDisposable
         });
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.review-item")), Wait);
 
-        await cut.Find("button.review-1y").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.review-1y");
 
         Bar.WaitForAssertion(() => Assert.Equal("Save Plan first.", data.StatusBar.Text), Wait);
         Assert.Equal(["Plan"], asked);
@@ -222,7 +222,7 @@ public sealed class ToReviewPanelTests : IDisposable
         data.WaitForRecentWrites();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find("button.review-3m").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.review-3m");
 
         Bar.WaitForAssertion(() => Assert.Equal("Save Plan first.", data.StatusBar.Text), Wait);
         data.WaitForRecentWrites();
@@ -241,7 +241,7 @@ public sealed class ToReviewPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("aside.todos-region li.review-item")), Wait);
         int mounts = js.Calls("ContextEditor.mount").Count;
 
-        await cut.Find("button.review-3m").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.review-3m");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("li.review-item")), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);

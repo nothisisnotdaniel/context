@@ -81,7 +81,7 @@ public sealed class TimesTodayButtonsTests : IDisposable
 
     private static async Task OpenForm(IRenderedComponent<TimesTodayPanel> cut)
     {
-        await cut.Find("button.times-checkpoint").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.times-checkpoint");
         cut.WaitForElement("div.times-form", Wait);
     }
 
@@ -187,7 +187,7 @@ public sealed class TimesTodayButtonsTests : IDisposable
 
         WriteDay(after switch { "working" => Working, "onbreak" => OnBreak, _ => Left });
         SortedDictionary<string, string> files = FileSnapshot.Take(data.TimesFolder);
-        await cut.Find("button." + button).ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button." + button);
 
         IElement result = WaitForResult(cut);
         Assert.Equal(booked, result.TextContent);
@@ -245,21 +245,21 @@ public sealed class TimesTodayButtonsTests : IDisposable
         await OpenForm(cut);
         string nameId = cut.Instance.NameInputReference.Id;
         cut.WaitForAssertion(() => Assert.Equal(nameId, LastFocusId()), Wait);
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = "Docs" });
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = "Docs" });
 
         switch (how)
         {
             case "name":
-                await cut.Find("input.times-name").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+                await StaleClick.KeyDownAsync(cut, "input.times-name", new KeyboardEventArgs { Key = "Escape" });
                 break;
             case "select":
-                await cut.Find("select.times-project").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+                await StaleClick.KeyDownAsync(cut, "select.times-project", new KeyboardEventArgs { Key = "Escape" });
                 break;
             case "book":
-                await cut.Find("button.times-book").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+                await StaleClick.KeyDownAsync(cut, "button.times-book", new KeyboardEventArgs { Key = "Escape" });
                 break;
             default:
-                await cut.Find("button.times-cancel").ClickAsync(new MouseEventArgs());
+                await StaleClick.ClickAsync(cut, "button.times-cancel");
                 break;
         }
 
@@ -288,9 +288,9 @@ public sealed class TimesTodayButtonsTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("select.times-project option").Count), Wait);
         SortedDictionary<string, string> files = FileSnapshot.Take(data.TimesFolder);
 
-        await cut.Find("select.times-project").ChangeAsync(new ChangeEventArgs { Value = project });
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = typed });
-        await cut.Find("input.times-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.ChangeAsync(cut, "select.times-project", new ChangeEventArgs { Value = project });
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = typed });
+        await StaleClick.KeyDownAsync(cut, "input.times-name", new KeyboardEventArgs { Key = "Enter" });
 
         IElement result = WaitForResult(cut);
         Assert.Equal($"Booked checkpoint {name} at 10:05 in Times.", result.TextContent);
@@ -312,8 +312,8 @@ public sealed class TimesTodayButtonsTests : IDisposable
         WaitForButtons(cut, "Break", "Checkpoint…", "Leave");
         await OpenForm(cut);
 
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = "Docs" });
-        await cut.Find("input.times-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter", IsComposing = true });
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = "Docs" });
+        await StaleClick.KeyDownAsync(cut, "input.times-name", new KeyboardEventArgs { Key = "Enter", IsComposing = true });
 
         Assert.Empty(data.TimesRunner.Calls);
         Assert.Single(cut.FindAll("div.times-form"));
@@ -330,8 +330,8 @@ public sealed class TimesTodayButtonsTests : IDisposable
         WaitForButtons(cut, "Break", "Checkpoint…", "Leave");
         await OpenForm(cut);
 
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = "Docs" });
-        await cut.Find("button.times-book").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = "Docs" });
+        await StaleClick.ClickAsync(cut, "button.times-book");
 
         Assert.Equal("Booked checkpoint Docs at 10:05 in Times.", WaitForResult(cut).TextContent);
         Assert.Equal(["checkpoint", "10:05", "Docs"], Assert.Single(data.TimesRunner.Calls));
@@ -348,8 +348,8 @@ public sealed class TimesTodayButtonsTests : IDisposable
         WaitForButtons(cut, "Break", "Checkpoint…", "Leave");
         await OpenForm(cut);
 
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = typed });
-        await cut.Find("input.times-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = typed });
+        await StaleClick.KeyDownAsync(cut, "input.times-name", new KeyboardEventArgs { Key = "Enter" });
 
         IElement result = WaitForResult(cut);
         Assert.Equal("Name the checkpoint.", result.TextContent);
@@ -385,8 +385,8 @@ public sealed class TimesTodayButtonsTests : IDisposable
         IRenderedComponent<TimesTodayPanel> cut = await Render();
         WaitForButtons(cut, "Break", "Checkpoint…", "Leave");
         await OpenForm(cut);
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = "Docs" });
-        await cut.Find("button.times-book").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = "Docs" });
+        await StaleClick.ClickAsync(cut, "button.times-book");
 
         IElement result = WaitForResult(cut);
         Assert.Equal(text, result.TextContent);
@@ -405,7 +405,7 @@ public sealed class TimesTodayButtonsTests : IDisposable
         IRenderedComponent<TimesTodayPanel> cut = await Render();
         WaitForButtons(cut, "Arrive");
 
-        await cut.Find("button.times-arrive").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.times-arrive");
 
         IElement result = WaitForResult(cut);
         Assert.Equal("Times didn't answer in time.", result.TextContent);
@@ -423,16 +423,16 @@ public sealed class TimesTodayButtonsTests : IDisposable
         IRenderedComponent<TimesTodayPanel> cut = await Render();
         WaitForButtons(cut, "Break", "Checkpoint…", "Leave");
         await OpenForm(cut);
-        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = "Docs" });
+        await StaleClick.InputAsync(cut, "input.times-name", new ChangeEventArgs { Value = "Docs" });
 
-        Task first = cut.Find("button.times-book").ClickAsync(new MouseEventArgs());
+        Task first = StaleClick.ClickAsync(cut, "button.times-book");
         cut.WaitForAssertion(() => Assert.Equal("true", cut.Find("section.times-today").GetAttribute("aria-busy")), Wait);
         cut.WaitForAssertion(() => Assert.Single(data.TimesRunner.Calls), Wait);
         Assert.All(cut.FindAll("section.times-today button"), b => Assert.True(b.HasAttribute("disabled")));
         Assert.True(cut.Find("input.times-name").HasAttribute("disabled"));
         Assert.True(cut.Find("select.times-project").HasAttribute("disabled"));
 
-        await cut.Find("input.times-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, "input.times-name", new KeyboardEventArgs { Key = "Enter" });
         Assert.Single(data.TimesRunner.Calls);
 
         hold.SetResult();

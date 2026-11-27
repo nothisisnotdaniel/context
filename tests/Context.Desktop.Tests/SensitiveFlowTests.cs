@@ -141,12 +141,12 @@ public sealed class SensitiveFlowTests : IDisposable
         await MainTests.ChooseAsync(cut, "history");
         cut.WaitForAssertion(() => Assert.Equal(["2026-10-29 09:00:00"], cut.FindAll(".history-row button").Select(b => b.TextContent)), Wait);
         Assert.Equal(1, data.Keys.Agrees);
-        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".history-row button");
         cut.WaitForAssertion(() => Assert.Equal(["- first", "+ second", "  "], cut.FindAll(".diff-line").Select(l => l.TextContent)), Wait);
         Assert.Equal(2, data.Keys.Agrees);
 
-        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.restore-version");
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Restored Plan to 2026-10-29 09:00:00.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(3, data.Keys.Agrees);
@@ -167,7 +167,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Empty(cut.FindAll("button.save"));
         js.Edit("new text\n");
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
@@ -233,7 +233,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await Open(cut, js, "Plan");
 
         data.UtcNow = data.UtcNow.AddMinutes(4);
-        await cut.Find(".note-editor").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "x" });
+        await StaleClick.InputAsync(cut, ".note-editor", new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "x" });
         data.UtcNow = data.UtcNow.AddMinutes(4);
 
         Assert.False(data.Session!.Tick());
@@ -345,7 +345,7 @@ public sealed class SensitiveFlowTests : IDisposable
         try
         {
             await MainTests.ChooseAsync(cut, "mark-sensitive");
-            await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
             cut.WaitForAssertion(() => Assert.Equal(
                 "Marked Plan sensitive, but its old readable versions couldn't be removed. Delete .history/Plan in the data folder.",
@@ -376,12 +376,12 @@ public sealed class SensitiveFlowTests : IDisposable
             "Mark Plan sensitive? It will open only in this app, with this machine's key or the recovery file.",
             dialog.QuerySelector(".question")!.TextContent);
         Assert.Equal("Mark sensitive", dialog.QuerySelector("button.confirm")!.TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(["Plan.md"], RootFiles());
 
         await MainTests.ChooseAsync(cut, "mark-sensitive");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Marked Plan sensitive.", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("accent", cut.Find(".main-status").ClassList);
@@ -402,7 +402,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await Open(cut, js, "Plan");
 
         await MainTests.ChooseAsync(cut, "mark-sensitive");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Set up recovery first.", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("red", cut.Find(".main-status").ClassList);
@@ -454,7 +454,7 @@ public sealed class SensitiveFlowTests : IDisposable
             "Make Plan plain? It will be stored as readable text again. Its history will be removed.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Make plain", cut.Find("[role=dialog] button.confirm").TextContent);
         Assert.Equal(["Plan.ctxs"], RootFiles());
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Made Plan plain.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(["Plan.md"], RootFiles());
@@ -475,8 +475,8 @@ public sealed class SensitiveFlowTests : IDisposable
         await Open(cut, js, "Plan");
 
         await MainTests.ChooseAsync(cut, "rename");
-        await cut.Find("input.rename-title").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "Project" });
-        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, "input.rename-title", new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "Project" });
+        await StaleClick.KeyDownAsync(cut, ".rename-title", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(["Project.ctxs"], RootFiles());
@@ -499,7 +499,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await MainTests.ChooseAsync(cut, "delete");
         Assert.Equal(["Other.md", "Plan.ctxs"], RootFiles());
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(["Other.md"], RootFiles()), Wait);
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("li.note button.name")), Wait);
@@ -538,9 +538,9 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Empty(cut.FindAll("button.export"));
         Assert.DoesNotContain("Export", await MenuLabelsAsync(cut));
 
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "/export" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "/export" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Plan is sensitive. Make it plain to export it.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -583,7 +583,7 @@ public sealed class SensitiveFlowTests : IDisposable
     {
         await MainTests.OpenMenuAsync(cut);
         string[] labels = cut.FindAll(".page-menu button").Select(b => b.TextContent).ToArray();
-        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu-backdrop");
         return labels;
     }
 

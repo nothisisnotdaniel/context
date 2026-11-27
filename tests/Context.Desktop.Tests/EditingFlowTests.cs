@@ -51,13 +51,13 @@ public sealed class EditingFlowTests : IDisposable
 
         IElement dialog = cut.Find("[role=dialog]");
         Assert.Equal("Discard changes to Plan?", dialog.QuerySelector(".question")!.TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
 
         await NoteOpener.OpenAsync(cut, "Other");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Other", cut.Find(".note-title").TextContent);
@@ -97,14 +97,14 @@ public sealed class EditingFlowTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         Assert.DoesNotContain(CommandPalette.Commands, c => c.Name == "/current");
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/current" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/current" });
         Assert.DoesNotContain("/current", cut.FindAll(".palette-row .usage").Select(u => u.TextContent));
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/c" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/c" });
         string[] ranked = cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray();
         Assert.Contains(ranked, u => u.StartsWith("/capture", StringComparison.Ordinal));
         Assert.DoesNotContain("/current", ranked);
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Escape" });
 
         using HeldRecentWrites? held = hold ? data.HoldRecentWrites() : null;
         await Open(cut, js, "Plan");
@@ -148,7 +148,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("#work", cut.Find(".tag-panel h2 .accent").TextContent);
 
-        await cut.FindAll(".tag-panel .note-button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".tag-panel .note-button")[1], e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal("beta", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".tag-panel"));
@@ -177,19 +177,19 @@ public sealed class EditingFlowTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = ctrl, MetaKey = meta });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = ctrl, MetaKey = meta });
 
         IElement dialog = cut.Find(".palette");
         Assert.Equal("dialog", dialog.GetAttribute("role"));
         JSRuntimeInvocation focus = data.Bunit.JSInterop.VerifyFocusAsyncInvoke();
         Assert.Equal(
-            cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
+            ElementRefs.Id<CommandPalette, Main>(cut, "input"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
             ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/digest", "/done <text>", "/donelog", "/export", "/find <attribute> <value>", "/glossary [filter]", "/import", "/meeting [<number>|<H:mm>|<title>]", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/share", "/similar", "/standup", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".palette"));
     }
 
@@ -198,26 +198,26 @@ public sealed class EditingFlowTests : IDisposable
     public async Task Palette_TypoAndArrows()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/opne" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/opne" });
         Assert.Equal(["/open <note>", "/done <text>", "/donelog"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/t" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/t" });
         Assert.Equal(["/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
         Assert.Equal("true", cut.FindAll(".palette-row")[0].GetAttribute("aria-selected"));
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "ArrowDown" });
         Assert.Equal("true", cut.FindAll(".palette-row")[1].GetAttribute("aria-selected"));
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "ArrowUp" });
         Assert.Equal("true", cut.FindAll(".palette-row")[0].GetAttribute("aria-selected"));
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/me" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/me" });
         Assert.Equal("/meeting [<number>|<H:mm>|<title>]", cut.FindAll(".palette-row .usage")[0].TextContent);
         Assert.Equal(
             "Open the note for today's current or next appointment, or the one with that number, time or title",
             cut.FindAll(".palette-row .description")[0].TextContent);
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/xyzzy" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/xyzzy" });
         Assert.Equal("No matching command.", cut.Find(".palette .none").TextContent);
     }
 
@@ -269,11 +269,11 @@ public sealed class EditingFlowTests : IDisposable
     public async Task Palette_Save_ListedAndNoNoteOpen()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
 
         IElement row = Assert.Single(cut.FindAll(".palette-row"), r => r.QuerySelector(".usage")!.TextContent == "/save");
         Assert.Equal("Save the open note", row.QuerySelector(".description")!.TextContent);
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Escape" });
 
         await RunPalette(cut, "/save");
 
@@ -293,7 +293,7 @@ public sealed class EditingFlowTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("#[big project]", cut.Find(".tag-panel h2 .accent").TextContent);
-        await cut.Find(".tag-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".tag-panel button.close");
         Assert.Empty(cut.FindAll(".tag-panel"));
     }
 
@@ -312,7 +312,7 @@ public sealed class EditingFlowTests : IDisposable
 
         if (button)
         {
-            await cut.Find(".notes-region button.tags-open").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".notes-region button.tags-open");
         }
         else
         {
@@ -327,7 +327,7 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Empty(cut.FindAll(".tag-panel"));
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
 
-        await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => TagButton(cut, "#work"), e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Alpha", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
@@ -337,19 +337,19 @@ public sealed class EditingFlowTests : IDisposable
         Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("tags-panel")).Index
             < region.Children.Index().Single(c => c.Item.ClassList.Contains("tag-panel")).Index);
 
-        await TagButton(cut, "#[big project]").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => TagButton(cut, "#[big project]"), e => e.ClickAsync(new MouseEventArgs()));
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("true", TagButton(cut, "#[big project]").GetAttribute("aria-pressed"));
         Assert.Equal("false", TagButton(cut, "#work").GetAttribute("aria-pressed"));
 
-        await cut.Find(".tag-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".tag-panel button.close");
         Assert.Empty(cut.FindAll(".tag-panel"));
         Assert.Single(cut.FindAll(".tags-panel"));
         Assert.Empty(cut.FindAll(".tag-list button[aria-pressed=true]"));
 
-        await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => TagButton(cut, "#work"), e => e.ClickAsync(new MouseEventArgs()));
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")), Wait);
-        await cut.Find(".tags-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".tags-panel button.close");
         Assert.Empty(cut.FindAll(".tags-panel"));
         Assert.Empty(cut.FindAll(".tag-panel"));
     }
@@ -360,18 +360,18 @@ public sealed class EditingFlowTests : IDisposable
     {
         data.WriteNote("Plan", "# Plan\n\n#work\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".notes-region button.tags-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".notes-region button.tags-open");
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".tags-panel").TextContent, StringComparison.Ordinal), Wait);
-        await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => TagButton(cut, "#work"), e => e.ClickAsync(new MouseEventArgs()));
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")), Wait);
 
         Assert.Equal("Close", cut.Find(".tag-panel button.close").TextContent);
         Assert.Single(cut.FindAll(".page > .panel-bar button.close"));
         Assert.Equal(2, cut.FindAll("button.close").Count);
 
-        await cut.Find(".tag-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".tag-panel button.close");
         Assert.Single(cut.FindAll(".tags-panel"));
-        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page > .panel-bar button.close");
         Assert.Empty(cut.FindAll(".tags-panel"));
     }
 
@@ -402,19 +402,19 @@ public sealed class EditingFlowTests : IDisposable
             await Open(cut, js, "Plan");
         }
 
-        await cut.Find(".notes-region button.tags-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".notes-region button.tags-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
-        await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => TagButton(cut, "#work"), e => e.ClickAsync(new MouseEventArgs()));
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel .note-button")), Wait);
 
         if (note)
         {
-            await cut.Find(".tag-panel .note-button").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".tag-panel .note-button");
             cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         }
         else
         {
-            await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.today-open");
             cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         }
 
@@ -478,7 +478,7 @@ public sealed class EditingFlowTests : IDisposable
 
         IElement button = cut.Find("li.note button.name");
         Assert.Equal("button", button.GetAttribute("type"));
-        await button.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find("li.note button.name"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["Plan"], opened);
     }
@@ -497,8 +497,8 @@ public sealed class EditingFlowTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 }

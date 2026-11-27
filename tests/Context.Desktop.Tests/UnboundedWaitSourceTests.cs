@@ -33,6 +33,10 @@ public sealed class UnboundedWaitSourceTests
 
     private const string Invocations = "JSInterop." + "Invocations";
 
+    // Spelled with a class, so this file's own pattern text doesn't match itself; the file is skipped by the scan anyway.
+    private static readonly Regex FiredEvent = new(
+        @"(?<!\bjs)\.(Click|Input|Change|KeyDown|KeyUp|DragStart|Drop)" + @"(Async)?\(", RegexOptions.CultureInvariant);
+
     public static TheoryData<string> TestSources()
     {
         TheoryData<string> data = [];
@@ -99,6 +103,69 @@ public sealed class UnboundedWaitSourceTests
             .ToArray();
 
         Assert.Equal(readers.Order(StringComparer.Ordinal).ToArray(), found);
+    }
+
+    // A page that renders again by itself gives its handlers new ids, so an element found from the test thread can
+    // name a dropped handler by the time its event is fired (job 491: RecentNotesActionsTests, SimilarPanelTests).
+    // Every event goes through StaleClick, which finds the element again; finding and firing inside cut.InvokeAsync
+    // (or a helper that does) is atomic on the dispatcher and needs none. A line that records the exception of an event
+    // on a stale element on purpose is not a problem.
+    [Theory]
+    [MemberData(nameof(TestSources))]
+    public void TestSource_FiresEventsThroughStaleClick(string file)
+    {
+        if (Path.GetFileName(file) is "StaleClick.cs" or "StaleClickTests.cs")
+        {
+            return;
+        }
+
+        string[] lines = File.ReadAllLines(Path.Combine(RepoFiles.Root(), file));
+        Assert.Empty(EventProblems(lines).Select(p => $"{file}: {p}"));
+    }
+
+    // Only the render that created an element carries its blazor:elementReference attribute, so a test reads the id
+    // from the component's field through ElementRefs (job 491).
+    [Theory]
+    [MemberData(nameof(TestSources))]
+    public void TestSource_ReadsNoElementReferenceFromMarkup(string file)
+    {
+        string[] lines = File.ReadAllLines(Path.Combine(RepoFiles.Root(), file));
+        string attribute = "GetAttribute(\"blazor:" + "elementReference\")";
+        Assert.Empty(lines
+            .Select((line, i) => (line, i))
+            .Where(l => l.line.Contains(attribute, StringComparison.Ordinal))
+            .Select(l => $"{file}: line {l.i + 1}: reads an element reference from the markup (use ElementRefs.Id)"));
+    }
+
+    [Theory]
+    [InlineData("await cut.Find(\"button.x\").ClickAsync(new MouseEventArgs());")]
+    [InlineData("Task click = cut.Find(\"button.x\").ClickAsync(new MouseEventArgs());")]
+    [InlineData("await button.ClickAsync(new MouseEventArgs());")]
+    [InlineData("await cut.FindAll(\"li\")[1].ChangeAsync(new ChangeEventArgs { Value = true });")]
+    [InlineData("await field.InputAsync(new ChangeEventArgs { Value = \"a\" });")]
+    [InlineData("PickFocusDay(cut).KeyDownAsync(new KeyboardEventArgs { Key = key });")]
+    [InlineData("await cut.Find(\"x\").KeyUpAsync(new KeyboardEventArgs());")]
+    [InlineData("cut.Find(\"button.x\").Click();")]
+    [InlineData("Box(cut, 1).Change(true);")]
+    [InlineData("FocusDay(cut).KeyDown(new KeyboardEventArgs { Key = key });")]
+    [InlineData("await Column(cut, \"todo\").DropAsync(new DragEventArgs());")]
+    [InlineData("await Card(cut, \"todo\", 0).DragStartAsync(new DragEventArgs());")]
+    public void EventProblems_FlagsAnEventOnAFoundElement(string line)
+    {
+        Assert.Single(EventProblems(["// a comment line", line]), p => p.StartsWith("line 2: ", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("await StaleClick.ClickAsync(cut, \"button.x\");")]
+    [InlineData("await StaleClick.FireAsync(cut, () => cut.FindAll(\"li\")[1], e => e.ChangeAsync(new ChangeEventArgs()));")]
+    [InlineData("await cut.InvokeAsync(() => cut.Find(\"x\").ClickAsync(new MouseEventArgs()));")]
+    [InlineData("await Act(cut, () => cut.Find(\"x\").ClickAsync(new MouseEventArgs()));")]
+    [InlineData("StaleClick.Fire(() => Box(cut, 1), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));")]
+    [InlineData("await js.Change(cut, \"# Plan\\n\");")]
+    [InlineData("Assert.IsType<UnknownEventHandlerIdException>(Record.Exception(() => focus.Click()));")]
+    public void EventProblems_AcceptsStaleClickAndTheDispatcher(string line)
+    {
+        Assert.Empty(EventProblems([line]));
     }
 
     [Fact]
@@ -169,6 +236,31 @@ public sealed class UnboundedWaitSourceTests
     public void Describe_ShowsSecondsOrMilliseconds(int milliseconds, string text)
     {
         Assert.Equal(text, BoundedWait.Describe(TimeSpan.FromMilliseconds(milliseconds)));
+    }
+
+    // Every line that fires an event on an element outside StaleClick and outside the dispatcher, as "line <n>: ...".
+    private static List<string> EventProblems(IReadOnlyList<string> lines)
+    {
+        List<string> found = [];
+        for (int i = 0; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            if (!FiredEvent.IsMatch(line) || line.TrimStart().StartsWith("//", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            bool safe = line.Contains("StaleClick.", StringComparison.Ordinal)
+                || line.Contains("InvokeAsync(() =>", StringComparison.Ordinal)
+                || line.Contains("Act(cut, () =>", StringComparison.Ordinal)
+                || line.Contains("Record.Exception(", StringComparison.Ordinal);
+            if (!safe)
+            {
+                found.Add($"line {i + 1}: an event fired on a found element (use StaleClick)");
+            }
+        }
+
+        return found;
     }
 
     private static string? Property(XDocument doc, string name) =>

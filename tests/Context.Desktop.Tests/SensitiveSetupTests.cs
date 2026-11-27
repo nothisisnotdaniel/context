@@ -60,7 +60,7 @@ public sealed class SensitiveSetupTests : IDisposable
         // An attribute can't carry a lone surrogate, so the row names it and it is put in here.
         await Type(cut, first.Replace("<lone surrogate>", "\uD800", StringComparison.Ordinal), second.Replace("<lone surrogate>", "\uD800", StringComparison.Ordinal));
 
-        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.confirm");
 
         Assert.Equal(text, cut.Find(".setup-status").TextContent);
         Assert.Contains("red", cut.Find(".setup-status").ClassList);
@@ -78,7 +78,7 @@ public sealed class SensitiveSetupTests : IDisposable
         IRenderedComponent<SensitiveSetup> cut = await Render(restore: false);
         await Type(cut, Password, Password);
 
-        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.confirm");
 
         Assert.Equal(1, data.Dialog.Saves);
         Assert.Equal(string.Empty, cut.Find(".setup-status").TextContent);
@@ -98,11 +98,11 @@ public sealed class SensitiveSetupTests : IDisposable
 
         if (byEnter)
         {
-            await cut.Find("input.recovery-password-again").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, "input.recovery-password-again", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.confirm");
         }
 
         cut.WaitForAssertion(() => Assert.Equal(["Recovery file saved. Keep it and its password safe."], done), Wait);
@@ -121,7 +121,7 @@ public sealed class SensitiveSetupTests : IDisposable
         IRenderedComponent<SensitiveSetup> cut = await Render(restore: false);
         await Type(cut, "caf\u00E9 au lait long", "cafe\u0301 au lait long");
 
-        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.confirm");
 
         cut.WaitForAssertion(() => Assert.Single(done), Wait);
         using System.Security.Cryptography.ECDiffieHellman key = RecoveryFile.Read(File.ReadAllBytes(data.RecoveryPath), "caf\u00E9 au lait long");
@@ -137,7 +137,7 @@ public sealed class SensitiveSetupTests : IDisposable
         IRenderedComponent<SensitiveSetup> cut = await Render(restore: false);
         await Type(cut, Password, Password);
 
-        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(DesktopActions.RecoveryFileExistsText, cut.Find(".setup-status").TextContent), Wait);
         Assert.Equal("mine", File.ReadAllText(data.RecoveryPath));
@@ -161,14 +161,14 @@ public sealed class SensitiveSetupTests : IDisposable
         Assert.Empty(cut.FindAll(".setup-warning"));
         Assert.Equal("Choose file and restore", cut.Find("button.confirm").TextContent);
 
-        await cut.Find("input.recovery-password").InputAsync(new ChangeEventArgs { Value = "wrong long password" });
-        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.recovery-password", new ChangeEventArgs { Value = "wrong long password" });
+        await StaleClick.ClickAsync(cut, "button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Can't read that recovery file.", cut.Find(".setup-status").TextContent), Wait);
         Assert.Empty(done);
         Assert.Null(data.Keys.MachinePublicKey());
 
-        await cut.Find("input.recovery-password").InputAsync(new ChangeEventArgs { Value = Password });
-        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.recovery-password", new ChangeEventArgs { Value = Password });
+        await StaleClick.ClickAsync(cut, "button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(["Restored 1 of 1 notes."], done), Wait);
         Assert.Equal(2, data.Dialog.Opens);
@@ -188,11 +188,11 @@ public sealed class SensitiveSetupTests : IDisposable
 
         if (escape)
         {
-            await cut.Find(".sensitive-setup").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, ".sensitive-setup", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find("button.cancel").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.cancel");
         }
 
         Assert.Equal(1, cancelled);
@@ -210,15 +210,15 @@ public sealed class SensitiveSetupTests : IDisposable
         Assert.Equal("Restore from recovery file", cut.Find("button.sensitive-restore-open").TextContent);
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
-        await cut.Find("button.sensitive-restore-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.sensitive-restore-open");
         Assert.Equal("Restore from recovery file", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
-        await cut.Find("button.sensitive-setup-open").ClickAsync(new MouseEventArgs());
-        await cut.Find("input.recovery-password").InputAsync(new ChangeEventArgs { Value = Password });
-        await cut.Find("input.recovery-password-again").InputAsync(new ChangeEventArgs { Value = Password });
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.sensitive-setup-open");
+        await StaleClick.InputAsync(cut, "input.recovery-password", new ChangeEventArgs { Value = Password });
+        await StaleClick.InputAsync(cut, "input.recovery-password-again", new ChangeEventArgs { Value = Password });
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() => Assert.Equal(
             "Recovery file saved. Keep it and its password safe.", data.StatusBar.Text), Wait);
@@ -241,7 +241,7 @@ public sealed class SensitiveSetupTests : IDisposable
 
     private static async Task Type(IRenderedComponent<SensitiveSetup> cut, string first, string second)
     {
-        await cut.Find("input.recovery-password").InputAsync(new ChangeEventArgs { Value = first });
-        await cut.Find("input.recovery-password-again").InputAsync(new ChangeEventArgs { Value = second });
+        await StaleClick.InputAsync(cut, "input.recovery-password", new ChangeEventArgs { Value = first });
+        await StaleClick.InputAsync(cut, "input.recovery-password-again", new ChangeEventArgs { Value = second });
     }
 }

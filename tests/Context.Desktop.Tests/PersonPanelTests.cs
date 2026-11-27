@@ -1,6 +1,7 @@
 using System.Reflection;
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -46,7 +47,7 @@ public sealed class PersonPanelTests : IDisposable
         Assert.Equal("Sync", cut.Find(".person-appointment:nth-child(2) .title").GetAttribute("title"));
         Assert.Empty(cut.FindAll("p[role=status]"));
 
-        await cut.FindAll(".person-notes button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".person-notes button")[1], e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["Review"], opened);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
@@ -377,12 +378,12 @@ public sealed class PersonPanelTests : IDisposable
             cut.FindAll("h2").Select(h => h.TextContent).ToArray()), Wait);
         Assert.Equal(["budget|Plan", "hiring|Plan"], TopicRows(cut));
 
-        await cut.Find("li.topic .topic-note").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "li.topic .topic-note");
         Assert.Equal(["Plan"], opened);
 
-        cut.FindAll("li.topic input.done")[0].Change(true);
+        StaleClick.Fire(() => cut.FindAll("li.topic input.done")[0], e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
         Assert.Contains("budget", cut.Find("[role=dialog]").TextContent, StringComparison.Ordinal);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(["hiring|Plan"], TopicRows(cut)), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -417,8 +418,8 @@ public sealed class PersonPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.topic")), Wait);
         data.WriteNote("Plan", "next: @[Ann Lee] budget later\n");
 
-        cut.Find("li.topic input.done").Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => cut.Find("li.topic input.done"), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() => Assert.Equal("red", data.StatusBar.Css), Wait);
         Assert.Empty(cut.FindAll("p.topic-result"));
@@ -565,12 +566,12 @@ public sealed class PersonPanelTests : IDisposable
             ["@[ Bob Berg ]", "@[Anna]"],
             cut.FindAll("ul.note-todos button.mention").Select(b => b.GetAttribute("title")!).ToArray());
 
-        await cut.Find("ul.note-todos button.mention").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "ul.note-todos button.mention");
 
         Assert.Equal(["Bob Berg"], people);
         Assert.Empty(opened);
 
-        await cut.Find("ul.note-todos button.todo-note").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "ul.note-todos button.todo-note");
 
         Assert.Equal(["Plans/Q4 meeting"], opened);
         Assert.Equal(["Bob Berg"], people);

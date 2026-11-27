@@ -51,8 +51,8 @@ public sealed class PeoplePanelTests : IDisposable
 
         // The attribute load re-renders the rows and Close with new handlers, so click only once it is done.
         cut.WaitForState(() => cut.Instance.Loaded, Wait);
-        await cut.FindAll("button.person-open").Single(b => b.TextContent == "bob").ClickAsync(new MouseEventArgs());
-        await cut.Find("button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("button.person-open").Single(b => b.TextContent == "bob"), e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, "button.close");
 
         Assert.Equal(["people/bob"], opened);
         Assert.Equal(1, closed);
@@ -206,24 +206,24 @@ public sealed class PeoplePanelTests : IDisposable
         IRenderedComponent<PeoplePanel> cut = data.Bunit.Render<PeoplePanel>();
         cut.WaitForAssertion(() => Assert.NotNull(cut.Find("select.people-affiliation")), Wait);
 
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "acme" });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = "acme" });
         Assert.Equal(["Anna", "Eve"], RowNames(cut));
         Assert.Equal("acme", Selected(cut.Find("select.people-affiliation")));
         Assert.Equal("Clear filters", cut.Find("button.people-clear").TextContent);
 
-        await cut.Find("select.people-role").ChangeAsync(new ChangeEventArgs { Value = "lead" });
+        await StaleClick.ChangeAsync(cut, "select.people-role", new ChangeEventArgs { Value = "lead" });
         Assert.Equal(["Anna", "Eve"], RowNames(cut));
 
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = string.Empty });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = string.Empty });
         Assert.Equal(["Anna", "Eve", "fay"], RowNames(cut));
         Assert.Equal(string.Empty, Selected(cut.Find("select.people-affiliation")));
         Assert.Equal("lead", Selected(cut.Find("select.people-role")));
         Assert.NotNull(cut.Find("button.people-clear"));
 
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "beta\u0007co" });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = "beta\u0007co" });
         Assert.Equal("Lead", Assert.Single(cut.FindAll("select.people-role option[selected]")).TextContent);
 
-        await cut.Find("button.people-clear").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.people-clear");
         Assert.Equal(["Anna", "Bea", "Carl", "Dan", "Eve", "fay"], RowNames(cut));
         Assert.Equal(string.Empty, Selected(cut.Find("select.people-affiliation")));
         Assert.Equal(string.Empty, Selected(cut.Find("select.people-role")));
@@ -247,9 +247,9 @@ public sealed class PeoplePanelTests : IDisposable
             [("", "All"), ("acme", "ACME"), ("beta gmbh", "Beta GmbH"), ("gamma", "Gamma")],
             Options(cut.Find("select.people-affiliation")));
 
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "acme" });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = "acme" });
         Assert.Equal(["Anna"], RowNames(cut));
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "beta gmbh" });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = "beta gmbh" });
         Assert.Equal(["Anna"], RowNames(cut));
     }
 
@@ -262,8 +262,8 @@ public sealed class PeoplePanelTests : IDisposable
         IRenderedComponent<PeoplePanel> cut = data.Bunit.Render<PeoplePanel>();
         cut.WaitForAssertion(() => Assert.NotNull(cut.Find("select.people-affiliation")), Wait);
 
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "acme" });
-        await cut.Find("select.people-role").ChangeAsync(new ChangeEventArgs { Value = "tester" });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = "acme" });
+        await StaleClick.ChangeAsync(cut, "select.people-role", new ChangeEventArgs { Value = "tester" });
 
         Assert.Empty(cut.FindAll("ul.people-list"));
         IElement status = cut.Find("p[role=status]");
@@ -342,8 +342,8 @@ public sealed class PeoplePanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<PeoplePanel> cut = data.Bunit.Render<PeoplePanel>();
         cut.WaitForAssertion(() => Assert.NotNull(cut.Find("select.people-affiliation")), Wait);
-        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "acme" });
-        await cut.Find("select.people-role").ChangeAsync(new ChangeEventArgs { Value = "tester" });
+        await StaleClick.ChangeAsync(cut, "select.people-affiliation", new ChangeEventArgs { Value = "acme" });
+        await StaleClick.ChangeAsync(cut, "select.people-role", new ChangeEventArgs { Value = "tester" });
 
         // Bea is no longer a tester; Anna gains a second affiliation.
         Edit(Path.Combine("people", "Bea.md"), "# Bea\nrole:: Writer\n");

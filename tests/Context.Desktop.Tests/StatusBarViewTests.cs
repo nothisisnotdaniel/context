@@ -73,7 +73,7 @@ public sealed class StatusBarViewTests : IDisposable
         AssertOneEmptyBar(cut);
         js.Edit("# Plan\n\nMore\n");
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find("footer.status-bar p.main-status").TextContent), Wait);
         Assert.Single(cut.FindAll("p.main-status"));

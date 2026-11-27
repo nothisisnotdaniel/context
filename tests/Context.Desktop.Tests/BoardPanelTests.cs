@@ -60,8 +60,8 @@ public sealed class BoardPanelTests : IDisposable
         Assert.Equal(["Move to todo"], Moves(Card(cut, BoardPanel.NoStatus, 1)));
         Assert.Equal(["Move to todo", "Move to done"], Moves(Card(cut, "doing", 0)));
 
-        await Card(cut, "doing", 0).QuerySelector("button.note-button")!.ClickAsync(new MouseEventArgs());
-        await cut.Find(".board-panel .close").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => Card(cut, "doing", 0).QuerySelector("button.note-button")!, e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, ".board-panel .close");
 
         Assert.Equal(["Plan"], opened);
         Assert.Equal(1, closed);
@@ -81,18 +81,18 @@ public sealed class BoardPanelTests : IDisposable
         Assert.Equal("Board #launch", cut.Find(".board-panel h2").TextContent);
         Assert.Equal(["Plan"], CardNames(cut, "todo"));
 
-        await Card(cut, "todo", 0).QuerySelector("button.note-button")!.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => Card(cut, "todo", 0).QuerySelector("button.note-button")!, e => e.ClickAsync(new MouseEventArgs()));
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
 
         await RunPalette(cut, "/board launch");
         WaitForBoard(cut);
-        await cut.Find(".board-panel .close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".board-panel .close");
         Assert.Empty(cut.FindAll(".board-panel"));
 
         await RunPalette(cut, "/tags launch");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")), Wait);
-        await cut.Find(".tag-panel button.board-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".tag-panel button.board-open");
         WaitForBoard(cut);
         Assert.Equal("Board #launch", cut.Find(".board-panel h2").TextContent);
         Assert.Empty(cut.FindAll(".tag-panel"));
@@ -135,13 +135,13 @@ public sealed class BoardPanelTests : IDisposable
         data.WriteNote("Plan", "# Plan\n#launch #status/todo\n");
         IRenderedComponent<BoardPanel> cut = await RenderBoard();
 
-        await Column(cut, "doing").DropAsync(new DragEventArgs());
-        await Card(cut, "todo", 0).DragStartAsync(new DragEventArgs());
-        await Column(cut, "todo").DropAsync(new DragEventArgs());
+        await StaleClick.FireAsync(cut, () => Column(cut, "doing"), e => e.DropAsync(new DragEventArgs()));
+        await StaleClick.FireAsync(cut, () => Card(cut, "todo", 0), e => e.DragStartAsync(new DragEventArgs()));
+        await StaleClick.FireAsync(cut, () => Column(cut, "todo"), e => e.DropAsync(new DragEventArgs()));
         Assert.Equal("# Plan\n#launch #status/todo\n", File.ReadAllText(PlanPath));
 
-        await Card(cut, "todo", 0).DragStartAsync(new DragEventArgs());
-        await Column(cut, "doing").DropAsync(new DragEventArgs());
+        await StaleClick.FireAsync(cut, () => Card(cut, "todo", 0), e => e.DragStartAsync(new DragEventArgs()));
+        await StaleClick.FireAsync(cut, () => Column(cut, "doing"), e => e.DropAsync(new DragEventArgs()));
 
         Assert.Equal("# Plan\n#launch #status/doing\n", File.ReadAllText(PlanPath));
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], CardNames(cut, "doing")), Wait);
@@ -156,7 +156,7 @@ public sealed class BoardPanelTests : IDisposable
         data.WriteNote("Plan", "#launch #status/done\n- { } ship it #launch\n");
         IRenderedComponent<BoardPanel> cut = await RenderBoard();
 
-        await MoveButton(cut, BoardPanel.NoStatus, 0, "Move to todo").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => MoveButton(cut, BoardPanel.NoStatus, 0, "Move to todo"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal("#launch #status/done\n- { } ship it #launch #status/todo\n", File.ReadAllText(PlanPath));
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], CardNames(cut, "todo")), Wait);
@@ -188,7 +188,7 @@ public sealed class BoardPanelTests : IDisposable
             File.WriteAllText(PlanPath, after);
         }
 
-        await MoveButton(cut, "todo", 0, "Move to doing").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => MoveButton(cut, "todo", 0, "Move to doing"), e => e.ClickAsync(new MouseEventArgs()));
 
         IElement line = Bar.Find(".main-status");
         Assert.Equal(text, line.TextContent);
@@ -218,9 +218,9 @@ public sealed class BoardPanelTests : IDisposable
         Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
         try
         {
-            await MoveButton(cut, "todo", 0, "Move to doing").ClickAsync(new MouseEventArgs());
-            await Card(cut, "todo", 0).DragStartAsync(new DragEventArgs());
-            await Column(cut, "done").DropAsync(new DragEventArgs());
+            await StaleClick.FireAsync(cut, () => MoveButton(cut, "todo", 0, "Move to doing"), e => e.ClickAsync(new MouseEventArgs()));
+            await StaleClick.FireAsync(cut, () => Card(cut, "todo", 0), e => e.DragStartAsync(new DragEventArgs()));
+            await StaleClick.FireAsync(cut, () => Column(cut, "done"), e => e.DropAsync(new DragEventArgs()));
         }
         finally
         {
@@ -310,9 +310,9 @@ public sealed class BoardPanelTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     private static void WaitForBoard(IRenderedComponent<IComponent> cut) =>

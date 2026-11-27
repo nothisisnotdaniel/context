@@ -95,8 +95,8 @@ public sealed class ItemPanelTests : IDisposable
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Empty(cut.FindAll("p[role=status]"));
 
-        await cut.FindAll(".item-notes button")[1].ClickAsync(new MouseEventArgs());
-        await cut.Find(".item-people button").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".item-notes button")[1], e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, ".item-people button");
 
         Assert.Equal(["Review"], opened);
         Assert.Equal(["Anna"], people);

@@ -121,9 +121,9 @@ public sealed class CommandBarMainTests : IDisposable
     {
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await Render();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/today" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/today" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
 

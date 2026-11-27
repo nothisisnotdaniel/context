@@ -71,8 +71,8 @@ public sealed class TimedTodoTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 }

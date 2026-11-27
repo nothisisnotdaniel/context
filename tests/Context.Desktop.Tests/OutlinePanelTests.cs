@@ -96,8 +96,8 @@ public sealed class OutlinePanelTests : IDisposable
             .Add(e => e.Headings, OutlineHeading.Parse(ThreeHeadings))
             .Add(e => e.OnJump, (int index) => jumps.Add(index)));
 
-        await cut.FindAll("nav.outline-panel button")[2].ClickAsync(new MouseEventArgs());
-        await cut.FindAll("nav.outline-panel button")[0].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("nav.outline-panel button")[2], e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.FireAsync(cut, () => cut.FindAll("nav.outline-panel button")[0], e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal([2, 0], jumps);
     }
@@ -130,7 +130,7 @@ public sealed class OutlinePanelTests : IDisposable
         js.Edit("# Plan\n\nunsaved\n");
         int mounts = js.Calls("ContextEditor.mount").Count;
         int focuses = js.Calls("ContextEditor.focus").Count;
-        await cut.FindAll("aside.todos-region nav.outline-panel button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("aside.todos-region nav.outline-panel button")[1], e => e.ClickAsync(new MouseEventArgs()));
 
         JSRuntimeInvocation jump = Assert.Single(js.Calls("ContextEditor.scrollToHeading"));
         Assert.Equal(js.Calls("ContextEditor.mount")[^1].Arguments[0], jump.Arguments[0]);
@@ -227,7 +227,7 @@ public sealed class OutlinePanelTests : IDisposable
 
         // 216: no note is open after the open note is deleted (Today opens today's note now).
         await MainTests.ChooseAsync(cut, "delete");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")), Wait);
         Assert.Single(cut.FindAll(".current-region p.no-note"));
         Assert.Empty(cut.FindAll("nav.outline-panel"));
@@ -297,7 +297,7 @@ public sealed class OutlinePanelTests : IDisposable
 
         js.SetHeadings(ThreeHeadings);
         js.Edit("# Plan\n\nmore\n");
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
         Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent);
@@ -335,18 +335,18 @@ public sealed class OutlinePanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
         int mounts = js.Calls("ContextEditor.mount").Count;
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".page")), Wait);
         Assert.Empty(cut.FindAll("nav.outline-panel"));
-        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page > .panel-bar button.close");
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
-        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".top-bar button.search-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop input")), Wait);
-        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".search-pop input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
         Assert.Empty(cut.FindAll("nav.outline-panel"));
-        await cut.Find(".search-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".search-panel button.close");
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
     }

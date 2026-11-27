@@ -62,7 +62,7 @@ public sealed class SimilarPanelTests : IDisposable
         Assert.All(cut.FindAll(".similar-panel button"), b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Equal(before, Files());
 
-        await cut.Find(".similar-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-panel button.close");
 
         Assert.Empty(cut.FindAll(".similar-panel"));
     }
@@ -123,7 +123,7 @@ public sealed class SimilarPanelTests : IDisposable
         Assert.Equal("No similar notes.", none.TextContent);
         Assert.True(none.ClassList.Contains("grey"));
 
-        await cut.Find(".similar-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-panel button.close");
         File.WriteAllText(Path.Combine(data.Root, TagIndex.FileName), NotADatabase);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
 
@@ -147,7 +147,7 @@ public sealed class SimilarPanelTests : IDisposable
         SortedDictionary<string, string> before = Files();
         int focused = Focuses();
 
-        await cut.Find(".similar-rows button.keep-first").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-rows button.keep-first");
 
         cut.WaitForAssertion(() => Assert.Equal(
             "Merge Project plans into Project plan? Its text is added to Project plan, links in 2 notes are updated and Project plans stays in its history.",
@@ -155,7 +155,7 @@ public sealed class SimilarPanelTests : IDisposable
         Assert.Equal("Merge", cut.Find(".similar-panel [role=dialog] button.confirm").TextContent);
         cut.WaitForAssertion(() => Assert.Equal(focused + 1, Focuses()), Wait);
 
-        await cut.Find(".similar-panel [role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-panel [role=dialog] button.cancel");
 
         Assert.Empty(cut.FindAll(".similar-panel [role=dialog]"));
         Assert.Equal(2, cut.FindAll(".similar-rows .note-button").Count);
@@ -171,9 +171,9 @@ public sealed class SimilarPanelTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await ShowAsync(cut);
 
-        await cut.Find(".similar-rows button.keep-second").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-rows button.keep-second");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".similar-panel [role=dialog]")), Wait);
-        await cut.Find(".similar-panel [role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-panel [role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".similar-rows li")), Wait);
         cut.WaitForAssertion(() => Assert.Equal("No similar notes.", cut.Find(".similar-panel p.grey[role=status]").TextContent), Wait);
@@ -200,7 +200,7 @@ public sealed class SimilarPanelTests : IDisposable
         await ShowAsync(cut);
         SortedDictionary<string, string> before = Files();
 
-        await cut.Find(".similar-rows button.keep-first").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-rows button.keep-first");
 
         cut.WaitForAssertion(() => Assert.Equal("Save " + open + " first.", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -219,9 +219,9 @@ public sealed class SimilarPanelTests : IDisposable
         await OpenAsync(cut, js, "Project plans");
         await ShowAsync(cut);
 
-        await cut.Find(".similar-rows button.keep-first").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-rows button.keep-first");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".similar-panel [role=dialog]")), Wait);
-        await cut.Find(".similar-panel [role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".similar-panel [role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Project plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("a\n\nb\n", File.ReadAllText(Path.Combine(data.Root, "Project plan.md")));
@@ -230,9 +230,9 @@ public sealed class SimilarPanelTests : IDisposable
     // Runs /similar and waits until the panel has loaded.
     private static async Task ShowAsync(IRenderedComponent<Main> cut)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/similar" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/similar" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(
             () => Assert.DoesNotContain("Loading…", cut.Find(".similar-panel").TextContent, StringComparison.Ordinal), Wait);
     }

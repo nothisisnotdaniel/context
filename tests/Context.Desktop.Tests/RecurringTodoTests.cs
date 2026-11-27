@@ -83,9 +83,9 @@ public sealed class RecurringTodoTests : IDisposable
     public async Task Palette_Done_Listed()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/don" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/don" });
 
         Assert.Equal("/done <text>", cut.FindAll(".palette-row .usage")[0].TextContent);
         Assert.Equal("Mark the todo with that text done", cut.FindAll(".palette-row .description")[0].TextContent);
@@ -131,7 +131,7 @@ public sealed class RecurringTodoTests : IDisposable
 
         Assert.Equal("Mark this todo done? Call Anna", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(files, Files());
@@ -146,7 +146,7 @@ public sealed class RecurringTodoTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         await RunPalette(cut, "/done water plants");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(
             () =>
@@ -169,9 +169,9 @@ public sealed class RecurringTodoTests : IDisposable
         data.AddTodo("Buy milk", DesktopFixture.Today);
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
-        Box(cut, 0).Change(true);
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
         Assert.Equal("Mark this todo done? Stretch", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(
             () =>
@@ -185,8 +185,8 @@ public sealed class RecurringTodoTests : IDisposable
             },
             Wait);
 
-        Box(cut, 0).Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() => Assert.Equal("Done: Buy milk", data.StatusBar.Text), Wait);
     }
@@ -231,8 +231,8 @@ public sealed class RecurringTodoTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 }

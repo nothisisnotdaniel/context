@@ -39,9 +39,9 @@ public sealed class MailDigestPanelTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal), Wait);
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/digest" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/digest" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() =>
         {
             Assert.Single(cut.FindAll(".mail-digest-panel"));
@@ -52,19 +52,19 @@ public sealed class MailDigestPanelTests : IDisposable
 
     private static async Task ReadMail(IRenderedComponent<Main> cut)
     {
-        await cut.Find("button.read-mail").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.read-mail");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".mail-digest-reading")), Wait);
     }
 
     private static string[] Texts(IRenderedComponent<Main> cut) =>
         [.. cut.FindAll(".digest-row .digest-text").Select(e => e.TextContent)];
 
-    // The ids of the Accept buttons, read in the render that created them.
+    // The ids of the Accept buttons, read from the panel's rows (job 491: not from the markup, which a later render
+    // leaves without them).
     private static string[] AcceptIds(IRenderedComponent<Main> cut)
     {
-        string[] ids = [.. cut.FindAll(".digest-row button.digest-accept").Select(b => b.GetAttribute("blazor:elementReference") ?? string.Empty)];
-        Assert.All(ids, id => Assert.False(string.IsNullOrEmpty(id)));
-        return ids;
+        int count = cut.FindAll(".digest-row button.digest-accept").Count;
+        return [.. Enumerable.Range(0, count).Select(i => ElementRefs.Id<MailDigestPanel, Main>(cut, $"rows[{i}].AcceptButton"))];
     }
 
     private int FocusCalls() =>
@@ -147,7 +147,7 @@ public sealed class MailDigestPanelTests : IDisposable
         IRenderedComponent<Main> cut = await Open();
         data.Outlook.Block();
 
-        Task click = cut.Find("button.read-mail").ClickAsync(new MouseEventArgs());
+        Task click = StaleClick.ClickAsync(cut, "button.read-mail");
 
         cut.WaitForAssertion(() => Assert.Equal("Reading mail…", cut.Find(".mail-digest-reading").TextContent), Wait);
         Assert.Contains("grey", cut.Find(".mail-digest-reading").ClassList);
@@ -264,7 +264,7 @@ public sealed class MailDigestPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll(".digest-row").Count), Wait);
         for (int i = 0; i < 3; i++)
         {
-            await cut.Find(".digest-row button.digest-dismiss").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".digest-row button.digest-dismiss");
         }
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".digest-row")), Wait);
@@ -284,7 +284,7 @@ public sealed class MailDigestPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".digest-row").Count), Wait);
         string[] ids = AcceptIds(cut);
 
-        await cut.Find(".digest-row button.digest-accept").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".digest-row button.digest-accept");
 
         cut.WaitForAssertion(() => Assert.Equal(["Please call Bob."], Texts(cut)), Wait);
         TodoItem added = Assert.Single(data.Todos!.List());
@@ -304,7 +304,7 @@ public sealed class MailDigestPanelTests : IDisposable
         await ReadMail(cut);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".digest-row")), Wait);
 
-        await cut.Find(".digest-row button.digest-accept").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".digest-row button.digest-accept");
 
         cut.WaitForAssertion(() => Assert.Equal("Note Planning already exists.", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("red", cut.Find(".main-status").ClassList);
@@ -324,14 +324,14 @@ public sealed class MailDigestPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".digest-row").Count), Wait);
         string[] ids = AcceptIds(cut);
 
-        await cut.Find(".digest-row button.digest-dismiss").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".digest-row button.digest-dismiss");
 
         cut.WaitForAssertion(() => Assert.Equal(["Please call Bob."], Texts(cut)), Wait);
         cut.WaitForAssertion(() => Assert.Equal(ids[1], LastFocusId()), Wait);
         int focused = FocusCalls();
 
         // With no row left, the focus goes to Read mail (a new focus call on another element).
-        await cut.Find(".digest-row button.digest-dismiss").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".digest-row button.digest-dismiss");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".digest-row")), Wait);
         cut.WaitForAssertion(() => Assert.True(FocusCalls() > focused), Wait);
         Assert.DoesNotContain(LastFocusId(), ids);
@@ -350,15 +350,15 @@ public sealed class MailDigestPanelTests : IDisposable
         TurnOn();
         IRenderedComponent<Main> cut = await Open();
 
-        await cut.Find(".mail-digest-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".mail-digest-panel button.close");
         Assert.Empty(cut.FindAll(".mail-digest-panel"));
 
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/digest" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/digest" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".mail-digest-panel")), Wait);
 
-        await cut.Find("section.mail-digest-panel").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, "section.mail-digest-panel", new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".mail-digest-panel"));
         Assert.Equal(0, data.Outlook.MailCalls);
     }

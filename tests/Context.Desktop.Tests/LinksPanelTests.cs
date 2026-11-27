@@ -74,8 +74,8 @@ public sealed class LinksPanelTests : IDisposable
             cut.FindAll(".link-row button.name").Select(b => b.TextContent).Order(StringComparer.Ordinal).ToArray());
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
-        await Row(cut, "Target").QuerySelector("button.name")!.ClickAsync(new MouseEventArgs());
-        await Row(cut, "Mutual").QuerySelector(".link-tags button")!.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => Row(cut, "Target").QuerySelector("button.name")!, e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.FireAsync(cut, () => Row(cut, "Mutual").QuerySelector(".link-tags button")!, e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["Target"], opened);
         Assert.Equal(["#[big project]"], tags);

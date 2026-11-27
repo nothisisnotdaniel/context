@@ -56,8 +56,8 @@ public sealed class SearchPanelTests : IDisposable
         // 295: the only status line is the count above the list.
         Assert.Equal("2 notes found", Assert.Single(cut.FindAll("p[role=status]")).TextContent);
 
-        await cut.FindAll(".search-hits button")[1].ClickAsync(new MouseEventArgs());
-        await cut.Find("button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits button")[1], e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, "button.close");
 
         Assert.Equal(["projects/Plan"], opened);
         Assert.Equal(1, closed);
@@ -279,17 +279,17 @@ public sealed class SearchPanelTests : IDisposable
             .Add(c => c.Text, string.Empty)
             .Add(c => c.OnClose, () => closed++));
 
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "budget" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "budget" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
         Assert.Equal("Search: budget", cut.Find("h2").TextContent);
 
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "#WORK" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "#WORK" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal(["Tagged"], NoteNames(cut)), Wait);
         Assert.Equal(0, closed);
 
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Escape" });
         Assert.Equal(1, closed);
     }
 
@@ -313,7 +313,7 @@ public sealed class SearchPanelTests : IDisposable
         Assert.All(cut.FindAll(".search-hits button"), b => Assert.True(b.ClassList.Contains("note-button")));
         Assert.Equal("Save search", cut.Find("button.search-save").TextContent);
 
-        await cut.FindAll(".search-hits button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits button")[1], e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["beta"], opened);
     }
 
@@ -346,7 +346,7 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Equal("people/Anna/Notes", shown["people/Anna/Notes"]);
         Assert.Equal("Plan", shown["Plan"]);
 
-        await cut.FindAll(".search-hits button.note-button").Single(b => b.GetAttribute("title") == "people/Anna").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits button.note-button").Single(b => b.GetAttribute("title") == "people/Anna"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["people/Anna"], opened);
     }
 
@@ -411,7 +411,7 @@ public sealed class SearchPanelTests : IDisposable
         IRenderedComponent<SearchPanel> cut = Render("  budget  ");
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
 
-        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.search-save");
 
         AngleSharp.Dom.IElement name = cut.Find("input.search-save-name");
         Assert.Equal("text", name.GetAttribute("type"));
@@ -420,11 +420,11 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Equal("50", name.GetAttribute("maxlength"));
         Assert.Empty(cut.FindAll("button.search-save"));
         cut.WaitForAssertion(() => Assert.Equal(
-            name.GetAttribute("blazor:elementReference"),
+            ElementRefs.Id<SearchPanel, SearchPanel>(cut, "saveInput"),
             ((ElementReference)data.JsCalls("Blazor._internal.domWrapper.focus")[^1].Arguments[0]!).Id), Wait);
 
-        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "  My   budget " });
-        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, "input.search-save-name", new ChangeEventArgs { Value = "  My   budget " });
+        await StaleClick.KeyDownAsync(cut, "input.search-save-name", new KeyboardEventArgs { Key = "Enter" });
 
         Bar.WaitForAssertion(() => Assert.Equal("Saved search My budget.", data.StatusBar.Text), Wait);
         AngleSharp.Dom.IElement result = Bar.Find(".main-status");
@@ -446,9 +446,9 @@ public sealed class SearchPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
-        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Mine" });
-        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.ClickAsync(cut, "button.search-save");
+        await StaleClick.InputAsync(cut, "input.search-save-name", new ChangeEventArgs { Value = "Mine" });
+        await StaleClick.KeyDownAsync(cut, "input.search-save-name", new KeyboardEventArgs { Key = "Escape" });
 
         Assert.Empty(cut.FindAll("input.search-save-name"));
         Assert.Single(cut.FindAll("button.search-save"));
@@ -466,8 +466,8 @@ public sealed class SearchPanelTests : IDisposable
         IRenderedComponent<SearchPanel> cut = Render("#a");
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
 
-        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
-        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.ClickAsync(cut, "button.search-save");
+        await StaleClick.KeyDownAsync(cut, "input.search-save-name", new KeyboardEventArgs { Key = "Enter" });
 
         Bar.WaitForAssertion(() => Assert.Equal(
             DesktopActions.SearchNameBlankText, data.StatusBar.Text), Wait);
@@ -611,24 +611,24 @@ public sealed class SearchPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(["A", "B", "C"], NoteNames(cut)), Wait);
         Assert.Equal(["0", "-1", "-1"], TabIndexes(cut));
 
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "ArrowDown" });
         AssertFocusedRow(cut, 0, 1);
 
-        await cut.FindAll(".search-hits .note-button")[0].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[0], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" }));
         Assert.Equal(["-1", "0", "-1"], TabIndexes(cut));
         AssertFocusedRow(cut, 1, 1);
-        await cut.FindAll(".search-hits .note-button")[1].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
-        await cut.FindAll(".search-hits .note-button")[2].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[1], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" }));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[2], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" }));
         Assert.Equal(["-1", "-1", "0"], TabIndexes(cut));
         AssertFocusedRow(cut, 2, 2);
 
-        await cut.FindAll(".search-hits .note-button")[2].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
-        await cut.FindAll(".search-hits .note-button")[1].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[2], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" }));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[1], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" }));
         Assert.Equal(["0", "-1", "-1"], TabIndexes(cut));
         AssertFocusedRow(cut, 0, 2);
 
         int inputFocus = FocusCount(cut, ".search-input");
-        await cut.FindAll(".search-hits .note-button")[0].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[0], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" }));
         cut.WaitForAssertion(() => Assert.Equal(inputFocus + 1, FocusCount(cut, ".search-input")), Wait);
         Assert.Equal(["0", "-1", "-1"], TabIndexes(cut));
     }
@@ -647,17 +647,17 @@ public sealed class SearchPanelTests : IDisposable
             .Add(c => c.OnOpen, ((string Note, string Text) hit) => opened.Add(hit)));
         cut.WaitForAssertion(() => Assert.Equal(["A", "B"], NoteNames(cut)), Wait);
 
-        await cut.FindAll(".search-hits .note-button")[1].KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        await cut.FindAll(".search-hits .note-button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[1], e => e.KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[1], e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal([("B", "budget")], opened);
-        await cut.FindAll(".search-hits .note-button")[1].KeyUpAsync(new KeyboardEventArgs { Key = "Enter" });
-        await cut.FindAll(".search-hits .note-button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[1], e => e.KeyUpAsync(new KeyboardEventArgs { Key = "Enter" }));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".search-hits .note-button")[1], e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal([("B", "budget"), ("B", "budget")], opened);
 
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "money" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "money" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal(["A"], NoteNames(cut)), Wait);
-        await cut.Find(".search-hits .note-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".search-hits .note-button");
         Assert.Equal(("A", "money"), opened[^1]);
     }
 
@@ -859,8 +859,8 @@ public sealed class SearchPanelTests : IDisposable
         Assert.True(cut.Markup.IndexOf("search-hits", StringComparison.Ordinal)
             < cut.Markup.IndexOf("search-times", StringComparison.Ordinal));
 
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "#plan" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "#plan" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("No notes match #plan.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.Empty(cut.FindAll("section.search-times"));
         Assert.True(SearchPanel.IsWorkItemQuery(" #7 "));
@@ -1016,24 +1016,24 @@ public sealed class SearchPanelTests : IDisposable
             < cut.Markup.IndexOf("search-to", StringComparison.Ordinal));
 
         // Typed but not searched: the date change searches the shown text.
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "typed only" });
-        await cut.Find("input.search-from").ChangeAsync(new ChangeEventArgs { Value = "2026-10-10" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "typed only" });
+        await StaleClick.ChangeAsync(cut, "input.search-from", new ChangeEventArgs { Value = "2026-10-10" });
         WaitForRows(cut, ["2026-10-25 #1234 Work 1:30"]);
         Assert.Equal(["Late"], NoteNames(cut));
         Assert.Equal("2026-10-10", cut.Find("input.search-from").GetAttribute("value"));
 
-        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-01" });
+        await StaleClick.ChangeAsync(cut, "input.search-to", new ChangeEventArgs { Value = "2026-10-01" });
         cut.WaitForAssertion(
             () => Assert.Equal("The start date is after the end date.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
         Assert.Empty(cut.FindAll("section.search-times"));
 
-        await cut.Find("input.search-from").ChangeAsync(new ChangeEventArgs { Value = string.Empty });
-        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-05" });
+        await StaleClick.ChangeAsync(cut, "input.search-from", new ChangeEventArgs { Value = string.Empty });
+        await StaleClick.ChangeAsync(cut, "input.search-to", new ChangeEventArgs { Value = "2026-10-05" });
         WaitForRows(cut, ["2026-10-02 #1234 Work 1:30"]);
         Assert.Equal(["Early"], NoteNames(cut));
 
-        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = string.Empty });
+        await StaleClick.ChangeAsync(cut, "input.search-to", new ChangeEventArgs { Value = string.Empty });
         WaitForRows(cut, ["2026-10-25 #1234 Work 1:30", "2026-10-02 #1234 Work 1:30"]);
 
         // A work item query is not offered for saving (SavedSearches.IsValidQuery refuses it).
@@ -1051,14 +1051,14 @@ public sealed class SearchPanelTests : IDisposable
 
         IRenderedComponent<SearchPanel> cut = Render("review");
         WaitForRows(cut, ["2026-10-02 Code Review 0:30"]);
-        await cut.Find("input.search-from").ChangeAsync(new ChangeEventArgs { Value = "2026-10-01" });
-        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-05" });
+        await StaleClick.ChangeAsync(cut, "input.search-from", new ChangeEventArgs { Value = "2026-10-01" });
+        await StaleClick.ChangeAsync(cut, "input.search-to", new ChangeEventArgs { Value = "2026-10-05" });
         WaitForRows(cut, ["2026-10-02 Code Review 0:30"]);
         Assert.Equal(["Plan"], NoteNames(cut));
 
-        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
-        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Reviews" });
-        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.ClickAsync(cut, "button.search-save");
+        await StaleClick.InputAsync(cut, "input.search-save-name", new ChangeEventArgs { Value = "Reviews" });
+        await StaleClick.KeyDownAsync(cut, "input.search-save-name", new KeyboardEventArgs { Key = "Enter" });
         Bar.WaitForAssertion(() => Assert.Equal("Saved search Reviews.", data.StatusBar.Text), Wait);
         SavedSearch saved = Assert.Single(new SettingsStore(data.Root).ReadSavedSearches());
         Assert.Equal("review", saved.Query);

@@ -213,7 +213,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.All(removes, b => Assert.Equal("×", b.TextContent));
         Assert.All(nav.QuerySelectorAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
-        await entries[0].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find("nav.saved-searches").QuerySelectorAll("button.saved-search")[0], e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["#job1234 and not #done"], searched);
     }
@@ -267,7 +267,7 @@ public sealed class NotesPanelTests : IDisposable
             "{\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"},{\"name\":\"Home\",\"query\":\"#home\"}]}");
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.saved-search-remove[aria-label='Remove Work']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.saved-search-remove[aria-label='Remove Work']");
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Home"], cut.FindAll("button.saved-search").Select(b => b.TextContent).ToArray()), Wait);
@@ -279,7 +279,7 @@ public sealed class NotesPanelTests : IDisposable
 
         // Removed outside the app, not yet refreshed: the button is still shown.
         data.WriteFile(SettingsStore.FileName, "{\"savedSearches\":[]}");
-        await cut.Find("button.saved-search-remove[aria-label='Remove Home']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.saved-search-remove[aria-label='Remove Home']");
 
         Bar.WaitForAssertion(() => Assert.Equal(
             "That saved search is gone. Nothing was done.", data.StatusBar.Text), Wait);
@@ -385,14 +385,14 @@ public sealed class NotesPanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
 
-        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Plan.md" });
+        await StaleClick.InputAsync(cut, ".note-new-title", new ChangeEventArgs { Value = "Plan.md" });
         if (enter)
         {
-            await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".note-new-title", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".note-new-title", new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -419,8 +419,8 @@ public sealed class NotesPanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
 
-        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = title });
-        await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".note-new-title", new ChangeEventArgs { Value = title });
+        await StaleClick.KeyDownAsync(cut, ".note-new-title", new KeyboardEventArgs { Key = "Enter" });
 
         IElement status = Bar.Find(".main-status");
         Assert.Equal(text, status.TextContent);
@@ -429,7 +429,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal(title, cut.Find(".note-new-title").GetAttribute("value"));
         Assert.Equal(text, status.GetAttribute("title"));
         Assert.Empty(opened);
-        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "x" });
+        await StaleClick.InputAsync(cut, ".note-new-title", new ChangeEventArgs { Value = "x" });
         Assert.Empty(cut.FindAll(".note-entry-result"));
         Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal("a", File.ReadAllText(Path.Combine(data.Root, "Alpha.md")));
@@ -448,7 +448,7 @@ public sealed class NotesPanelTests : IDisposable
 
         IElement button = cut.Find(".notes button.people-open");
         Assert.Equal("button", button.GetAttribute("type"));
-        await button.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".notes button.people-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(1, asked);
         Assert.Equal(before, FileSnapshot.Take(data.Root));
@@ -467,7 +467,7 @@ public sealed class NotesPanelTests : IDisposable
         IElement button = cut.Find(".notes button.tags-open");
         Assert.Equal("Tags", button.GetAttribute("aria-label"));
         Assert.Equal("button", button.GetAttribute("type"));
-        await button.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".notes button.tags-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(1, asked);
         Assert.Equal(before, FileSnapshot.Take(data.Root));
@@ -486,7 +486,7 @@ public sealed class NotesPanelTests : IDisposable
         IElement button = cut.Find(".notes button.settings-open");
         Assert.Equal("Settings", button.GetAttribute("aria-label"));
         Assert.Equal("button", button.GetAttribute("type"));
-        await button.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".notes button.settings-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(1, asked);
         Assert.Equal(before, FileSnapshot.Take(data.Root));
@@ -504,7 +504,7 @@ public sealed class NotesPanelTests : IDisposable
         IElement button = cut.Find(".notes button.import");
         Assert.Equal("Import", button.TextContent);
         Assert.Equal("button", button.GetAttribute("type"));
-        await button.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".notes button.import"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(1, data.Dialog.ImportOpens);
         Assert.Empty(cut.FindAll(".import-result p"));
@@ -532,11 +532,11 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = [source];
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
         if (kind == "notreplaced")
         {
             cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
-            await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         }
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".import-result p")), Wait);
@@ -546,7 +546,7 @@ public sealed class NotesPanelTests : IDisposable
         int builds = data.State.Builds;
         data.Dialog.ImportPaths = [];
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".import-result p")), Wait);
         Assert.Equal(2, data.Dialog.ImportOpens);
@@ -565,7 +565,7 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = [beta, missing, alpha];
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         Assert.Equal(1, data.Dialog.ImportOpens);
         IElement region = cut.Find(".import-result");
@@ -596,7 +596,7 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = Enumerable.Range(0, 101).Select(i => Source($"N{i}.md", "x\n")).ToList();
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         IElement line = Assert.Single(cut.FindAll(".import-result p"));
         Assert.Equal("Choose at most 100 files.", line.TextContent);
@@ -611,7 +611,7 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = Enumerable.Range(0, 100).Select(i => Source($"N{i}.md", "x\n")).ToList();
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         Assert.Equal(100, cut.FindAll(".import-result p.accent").Count);
         Assert.Equal(100, Files().Count);
@@ -628,7 +628,7 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = [plan, other];
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         Assert.Equal("old\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("other\n", File.ReadAllText(Path.Combine(data.Root, "Other.md")));
@@ -637,7 +637,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal("Replace", dialog.QuerySelector("button.confirm")!.TextContent);
         Assert.StartsWith("Imported Other.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal);
 
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -663,17 +663,17 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = [Source("Plan.md", "new\n"), Source("Fresh.md", "fresh\n"), Source("Ideas.md", "new\n")];
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         Assert.Equal("Replace 2 notes? Plan, Ideas", cut.Find("[role=dialog] .question").TextContent);
         SortedDictionary<string, string> before = Files();
         if (esc)
         {
-            await cut.Find("[role=dialog]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, "[role=dialog]", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         }
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -703,7 +703,7 @@ public sealed class NotesPanelTests : IDisposable
         data.Dialog.ImportPaths = [source, Path.Combine(folder, "Gone.md")];
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.import");
 
         IReadOnlyList<IElement> lines = cut.FindAll(".import-result p");
         Assert.Equal(2, lines.Count);
@@ -805,7 +805,7 @@ public sealed class NotesPanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
 
-        await cut.Find("button.name[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.name[title='Meetings/Meeting 1']");
 
         Assert.Equal(["Meetings/Meeting 1"], opened);
     }
@@ -1013,7 +1013,7 @@ public sealed class NotesPanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
 
-        await cut.Find("ul.pinned-notes button.name[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "ul.pinned-notes button.name[title='Meetings/Meeting 1']");
 
         Assert.Equal(["Meetings/Meeting 1"], opened);
     }

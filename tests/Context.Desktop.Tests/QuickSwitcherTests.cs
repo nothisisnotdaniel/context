@@ -25,7 +25,7 @@ public sealed class QuickSwitcherTests : IDisposable
         data.WriteNote("Plan", "# Plan\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = !mac, MetaKey = mac });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "p", CtrlKey = !mac, MetaKey = mac });
 
         IElement dialog = cut.Find(".dialog.switcher");
         Assert.Equal("dialog", dialog.GetAttribute("role"));
@@ -47,7 +47,7 @@ public sealed class QuickSwitcherTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "p", MetaKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "p", MetaKey = true });
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".dialog.switcher")), Wait);
     }
@@ -58,14 +58,14 @@ public sealed class QuickSwitcherTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "p", CtrlKey = true });
         Assert.Single(cut.FindAll(".palette"));
         Assert.Empty(cut.FindAll(".switcher"));
 
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = true });
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", MetaKey = true });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "p", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", MetaKey = true });
         Assert.Single(cut.FindAll(".switcher"));
         Assert.Empty(cut.FindAll(".palette"));
     }
@@ -94,7 +94,7 @@ public sealed class QuickSwitcherTests : IDisposable
             cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("[role=dialog]")), Wait);
         }
 
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "p", CtrlKey = true });
 
         Assert.Empty(cut.FindAll(".switcher"));
     }
@@ -152,7 +152,7 @@ public sealed class QuickSwitcherTests : IDisposable
         Assert.Equal(0, Selected(cut));
         await Key(cut, "ArrowDown");
 
-        await cut.Find(".switcher-input").InputAsync(new ChangeEventArgs { Value = "a" });
+        await StaleClick.InputAsync(cut, ".switcher-input", new ChangeEventArgs { Value = "a" });
         Assert.Equal(0, Selected(cut));
         Assert.Single(cut.FindAll(".switcher-row[aria-selected='true']"));
     }
@@ -166,7 +166,7 @@ public sealed class QuickSwitcherTests : IDisposable
         data.WriteRecent("Plan");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await OpenSwitcher();
-        await cut.Find(".switcher-input").InputAsync(new ChangeEventArgs { Value = "oth" });
+        await StaleClick.InputAsync(cut, ".switcher-input", new ChangeEventArgs { Value = "oth" });
 
         await Key(cut, "Enter");
 
@@ -187,9 +187,9 @@ public sealed class QuickSwitcherTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await js.Change(cut, "# Plan\n\nTyped\n");
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "p", CtrlKey = true });
 
-        await cut.Find(".switcher-row .name[title='Other']").ParentElement!.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".switcher-row .name[title='Other']").ParentElement!, e => e.ClickAsync(new MouseEventArgs()));
 
         await WaitOpened(cut, js, "Other");
         Assert.Empty(cut.FindAll(".switcher"));
@@ -212,7 +212,7 @@ public sealed class QuickSwitcherTests : IDisposable
 
         if (backdrop)
         {
-            await cut.Find(".dialog-backdrop").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".dialog-backdrop");
         }
         else
         {
@@ -234,7 +234,7 @@ public sealed class QuickSwitcherTests : IDisposable
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await OpenSwitcher();
-        await cut.Find(".switcher-input").InputAsync(new ChangeEventArgs { Value = "  Fresh idea  " });
+        await StaleClick.InputAsync(cut, ".switcher-input", new ChangeEventArgs { Value = "  Fresh idea  " });
         IElement row = cut.Find(".switcher-row");
         Assert.Equal("Create \"Fresh idea\"", row.TextContent.Trim());
         Assert.Equal("true", row.GetAttribute("aria-selected"));
@@ -243,7 +243,7 @@ public sealed class QuickSwitcherTests : IDisposable
 
         if (click)
         {
-            await cut.Find(".switcher-row").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".switcher-row");
         }
         else
         {
@@ -264,7 +264,7 @@ public sealed class QuickSwitcherTests : IDisposable
         data.WriteNote("Plan", "# Plan\n");
         IRenderedComponent<Main> cut = await OpenSwitcher();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
-        await cut.Find(".switcher-input").InputAsync(new ChangeEventArgs { Value = "x:y" });
+        await StaleClick.InputAsync(cut, ".switcher-input", new ChangeEventArgs { Value = "x:y" });
 
         await Key(cut, "Enter");
 
@@ -316,13 +316,13 @@ public sealed class QuickSwitcherTests : IDisposable
     private async Task<IRenderedComponent<Main>> OpenSwitcher()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "p", CtrlKey = true });
         Assert.Single(cut.FindAll(".dialog.switcher"));
         return cut;
     }
 
     private static Task Key(IRenderedComponent<Main> cut, string key) =>
-        cut.Find(".switcher-input").KeyDownAsync(new KeyboardEventArgs { Key = key });
+        StaleClick.KeyDownAsync(cut, ".switcher-input", new KeyboardEventArgs { Key = key });
 
     private static string[] RowNames(IRenderedComponent<Main> cut) =>
         cut.FindAll(".switcher-row .name").Select(n => n.TextContent).ToArray();

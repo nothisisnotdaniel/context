@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -37,7 +38,7 @@ public sealed class AllTodosPanelTests : IDisposable
         Assert.Equal("Todos", cut.Find(".panel-bar h2").TextContent);
         Assert.Equal("close", cut.Find(".panel-bar").LastElementChild!.ClassName);
 
-        await cut.Find(".panel-bar button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".panel-bar button.close");
 
         Assert.Equal(1, closed);
     }
@@ -102,7 +103,7 @@ public sealed class AllTodosPanelTests : IDisposable
 
         IElement mention = cut.Find("li.todo button.mention");
         Assert.Equal("button", mention.GetAttribute("type"));
-        await mention.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find("li.todo button.mention"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["Anna"], people);
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -124,7 +125,7 @@ public sealed class AllTodosPanelTests : IDisposable
         Assert.Equal("button", button.GetAttribute("type"));
         Assert.Single(cut.FindAll("button.todo-note"));
         Assert.Empty(cut.FindAll("button.todo-meeting"));
-        await button.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find("button.todo-note"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["Meeting"], opened);
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -153,7 +154,7 @@ public sealed class AllTodosPanelTests : IDisposable
         Assert.Equal("Meeting cancelled or moved", hint.TextContent);
         Assert.Contains("grey", hint.ClassList);
 
-        await rows[2].QuerySelector("button.todo-meeting")!.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("li.todo")[2].QuerySelector("button.todo-meeting")!, e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal([("Sync", new DateOnly(2026, 11, 5))], meetings);
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -168,15 +169,15 @@ public sealed class AllTodosPanelTests : IDisposable
         IRenderedComponent<AllTodosPanel> cut = await Render();
         SortedDictionary<string, string> files = Files();
 
-        Box(cut, 0).Change(true);
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
         Assert.Equal("Mark this todo done? Stored", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Mark done", cut.Find("[role=dialog] button.confirm").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
-        Box(cut, 1).Change(true);
+        StaleClick.Fire(() => Box(cut, 1), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
         Assert.Equal("Mark this todo done? call Anna", cut.Find("[role=dialog] .question").TextContent);
-        cut.Find("[role=dialog]").KeyDown(new KeyboardEventArgs { Key = "Escape" });
+        StaleClick.Fire(() => cut.Find("[role=dialog]"), e => e.KeyDownAsync(new KeyboardEventArgs { Key = "Escape" }));
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.False(Box(cut, 0).HasAttribute("checked"));
@@ -193,8 +194,8 @@ public sealed class AllTodosPanelTests : IDisposable
         data.AddTodo("Other", DesktopFixture.Today.AddDays(1));
         IRenderedComponent<AllTodosPanel> cut = await Render();
 
-        Box(cut, 0).Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() =>
         {
@@ -218,8 +219,8 @@ public sealed class AllTodosPanelTests : IDisposable
         WriteNoteInPast("Meeting", "- { } call Anna\n");
         IRenderedComponent<AllTodosPanel> cut = await Render();
 
-        Box(cut, 0).Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() =>
         {
@@ -239,8 +240,8 @@ public sealed class AllTodosPanelTests : IDisposable
         data.AddTodo("Stretch", DesktopFixture.Today.AddDays(-3), TodoRepeat.Daily);
         IRenderedComponent<AllTodosPanel> cut = await Render();
 
-        Box(cut, 0).Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() =>
         {
@@ -260,8 +261,8 @@ public sealed class AllTodosPanelTests : IDisposable
         IRenderedComponent<AllTodosPanel> cut = await Render();
         File.Delete(Path.Combine(data.Root, "Meeting.md"));
 
-        Box(cut, 0).Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() =>
         {
@@ -285,8 +286,8 @@ public sealed class AllTodosPanelTests : IDisposable
             File.AppendAllText(Path.Combine(data.Root, "done.md"), $"- theirs {calls}\n");
         };
 
-        Box(cut, 0).Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => Box(cut, 0), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() =>
         {

@@ -43,14 +43,14 @@ public sealed class TodoEntryTests : IDisposable
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
-        await cut.Find(".todo-entry .due-tomorrow").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".todo-entry .due-tomorrow");
         Assert.Equal("2026-10-30", cut.Find("input.todo-due").GetAttribute("value"));
-        await cut.Find(".todo-entry .due-today").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".todo-entry .due-today");
         Assert.Equal("2026-10-29", cut.Find("input.todo-due").GetAttribute("value"));
-        await cut.Find(".todo-entry .due-tomorrow").ClickAsync(new MouseEventArgs());
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+        await StaleClick.ClickAsync(cut, ".todo-entry .due-tomorrow");
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Buy milk" });
 
-        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".todo-entry .todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal("Buy milk", added.Text);
@@ -67,14 +67,13 @@ public sealed class TodoEntryTests : IDisposable
     public async Task Enter_WithPickedDate_Adds()
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
-        string? textId = cut.Find("input.todo-text").GetAttribute("blazor:elementReference");
-        Assert.False(string.IsNullOrEmpty(textId));
-        await cut.Find("input.todo-due").ChangeAsync(new ChangeEventArgs { Value = "2026-12-24" });
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Presents" });
+        string textId = ElementRefs.Id<TodoPanel, TodoPanel>(cut, "textField");
+        await StaleClick.ChangeAsync(cut, "input.todo-due", new ChangeEventArgs { Value = "2026-12-24" });
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Presents" });
 
-        await cut.Find("input.todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "a" });
+        await StaleClick.KeyDownAsync(cut, "input.todo-text", new KeyboardEventArgs { Key = "a" });
         Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
-        await cut.Find("input.todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, "input.todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal(new DateOnly(2026, 12, 24), added.Due);
@@ -87,9 +86,9 @@ public sealed class TodoEntryTests : IDisposable
     public async Task Enter_AddsAndFocusesTheField()
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Buy milk" });
 
-        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".todo-entry .todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Single(data.Todos!.List());
         Assert.Contains(data.JsCalls(), i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
@@ -103,9 +102,9 @@ public sealed class TodoEntryTests : IDisposable
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         using ManualResetEventSlim release = new ManualResetEventSlim();
         data.Actions!.BeforeWrite = () => release.Wait(TimeSpan.FromSeconds(10));
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Buy milk" });
 
-        Task add = cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        Task add = StaleClick.KeyDownAsync(cut, ".todo-entry .todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
@@ -125,9 +124,9 @@ public sealed class TodoEntryTests : IDisposable
     public async Task Enter_InDateOrTimeInput_Adds(string selector)
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Buy milk" });
 
-        await cut.Find(selector).KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, selector, new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Single(data.Todos!.List());
     }
@@ -139,7 +138,7 @@ public sealed class TodoEntryTests : IDisposable
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".todo-entry .todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Write the todo first.", data.StatusBar.Text);
         Assert.Equal("red", data.StatusBar.Css);
@@ -168,11 +167,11 @@ public sealed class TodoEntryTests : IDisposable
     public async Task Add_WithTime_StoresTimeAndClears(string value)
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
-        await cut.Find("input.todo-time").ChangeAsync(new ChangeEventArgs { Value = value });
+        await StaleClick.ChangeAsync(cut, "input.todo-time", new ChangeEventArgs { Value = value });
         Assert.Equal("14:00", cut.Find("input.todo-time").GetAttribute("value"));
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Call Anna" });
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Call Anna" });
 
-        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".todo-entry .todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal(new TimeOnly(14, 0), added.Time);
@@ -191,12 +190,12 @@ public sealed class TodoEntryTests : IDisposable
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         if (cleared is not null)
         {
-            await cut.Find("input.todo-time").ChangeAsync(new ChangeEventArgs { Value = "09:15" });
-            await cut.Find("input.todo-time").ChangeAsync(new ChangeEventArgs { Value = cleared });
+            await StaleClick.ChangeAsync(cut, "input.todo-time", new ChangeEventArgs { Value = "09:15" });
+            await StaleClick.ChangeAsync(cut, "input.todo-time", new ChangeEventArgs { Value = cleared });
         }
 
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
-        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, "input.todo-text", new ChangeEventArgs { Value = "Buy milk" });
+        await StaleClick.KeyDownAsync(cut, ".todo-entry .todo-text", new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Null(added.Time);

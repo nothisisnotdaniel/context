@@ -66,9 +66,9 @@ public sealed class TagsPanelTests : IDisposable
             ["#[big project]"],
             cut.FindAll(".tag-list button[aria-pressed=true]").Select(b => b.TextContent).ToArray());
         Assert.Equal(2, cut.FindAll(".tag-list button[aria-pressed=false]").Count);
-        await cut.FindAll(".tag-list button").Single(b => b.TextContent == "#[big project]").ClickAsync(new MouseEventArgs());
-        await cut.FindAll(".tag-list button").Single(b => b.TextContent == "#work").ClickAsync(new MouseEventArgs());
-        await cut.Find("button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".tag-list button").Single(b => b.TextContent == "#[big project]"), e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".tag-list button").Single(b => b.TextContent == "#work"), e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, "button.close");
 
         Assert.Equal(["#[big project]", "#work"], clicked);
         Assert.Equal(1, closed);
