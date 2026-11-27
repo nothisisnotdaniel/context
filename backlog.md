@@ -164,7 +164,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks → 447-tab-indents-code-blocks.917164b0c5024f5d8c1ab24596218497
 - [x] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop → 451-pinned-drag-order.428674b500794b029971364936de52ff
 - [x] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages → 455-status-bar-feedback.6ce4016f7e024aa28109de18e4727b3a
-- [ ] [#490](backlog/490-attendees-by-role-on-the-appointment.md) Attendees by role on the appointment page
+- [x] [#490](backlog/490-attendees-by-role-on-the-appointment.md) Attendees by role on the appointment page → 483-attendees-by-role.7e6bcb6115c34d74ab8fe7e19bd682ff
 - [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
 - [ ] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
