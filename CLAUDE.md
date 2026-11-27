@@ -2466,3 +2466,6 @@ Every factory agent reads this file before working on Context. Keep it short and
   - No new NuGet packages without a reason in the spec. The approver escalates any new dependency.
 - **Git:** `develop` is the working branch: factory work branches off it as `factory/<job-id>` and is merged back with `--no-ff`. `main` holds releases only and is pushed to only for a new release.
   `.gitignore` is the standard `dotnet new gitignore`.
+
+## Lessons
+- Guard async UI work against disposal: set a disposed flag in Dispose, check it before InvokeAsync or StateHasChanged, and catch exceptions in fire-and-forget tasks.
