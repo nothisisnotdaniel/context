@@ -68,11 +68,11 @@ public sealed class MailDigestPanelTests : IDisposable
     }
 
     private int FocusCalls() =>
-        data.Bunit.JSInterop.Invocations.Count(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+        data.JsCalls().Count(i => i.Identifier == "Blazor._internal.domWrapper.focus");
 
     private string LastFocusId()
     {
-        JSRuntimeInvocation last = data.Bunit.JSInterop.Invocations.Last(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+        JSRuntimeInvocation last = data.JsCalls().Last(i => i.Identifier == "Blazor._internal.domWrapper.focus");
         return ((ElementReference)last.Arguments[0]!).Id;
     }
 

@@ -5,6 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- A test that runs longer than 60 s aborts the run and the log names it (VSTest hang blame, job 491).
+         No memory dump is written, so no fixture text lands in a file. -->
+    <VSTestBlameHang>true</VSTestBlameHang>
+    <VSTestBlameHangTimeout>60s</VSTestBlameHangTimeout>
+    <VSTestBlameHangDumpType>none</VSTestBlameHangDumpType>
   </PropertyGroup>
 
   <ItemGroup>

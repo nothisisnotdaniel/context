@@ -348,17 +348,23 @@ public sealed class ProSettingsTests : IDisposable
     // The element ids of every domWrapper.focus call, read on the renderer's dispatcher so the list is not
     // read while the renderer adds to it.
     private List<string> FocusIds(IRenderedComponent<Main> cut) =>
-        cut.InvokeAsync(() => data.Bunit.JSInterop.Invocations
-            .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
-            .Select(i => ((ElementReference)i.Arguments[0]!).Id)
-            .ToList()).GetAwaiter().GetResult();
+        BoundedWait.Result(
+            cut.InvokeAsync(() => data.Bunit.JSInterop.Invocations
+                .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
+                .Select(i => ((ElementReference)i.Arguments[0]!).Id)
+                .ToList()),
+            BoundedWait.Dispatcher,
+            "ProSettingsTests.FocusIds on the renderer's dispatcher");
 
     // The proHeading reference of the SettingsPanel shown now.
     private static string CurrentHeadingRef(IRenderedComponent<Main> cut)
     {
-        string id = cut.InvokeAsync(() => ((ElementReference)typeof(SettingsPanel)
-            .GetField("proHeading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .GetValue(cut.FindComponent<SettingsPanel>().Instance)!).Id).GetAwaiter().GetResult();
+        string id = BoundedWait.Result(
+            cut.InvokeAsync(() => ((ElementReference)typeof(SettingsPanel)
+                .GetField("proHeading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .GetValue(cut.FindComponent<SettingsPanel>().Instance)!).Id),
+            BoundedWait.Dispatcher,
+            "ProSettingsTests.CurrentHeadingRef on the renderer's dispatcher");
         Assert.False(string.IsNullOrEmpty(id));
         return id;
     }

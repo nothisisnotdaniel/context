@@ -284,7 +284,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         ElementReference toggle = (ElementReference)typeof(Main)
             .GetField(side + "Toggle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
-        JSRuntimeInvocation focus = data.Bunit.JSInterop.Invocations.Last(i => i.Identifier.EndsWith(".focus", StringComparison.Ordinal));
+        JSRuntimeInvocation focus = data.JsCalls().Last(i => i.Identifier.EndsWith(".focus", StringComparison.Ordinal));
         Assert.Equal(toggle.Id, ((ElementReference)focus.Arguments[0]!).Id);
     }
 

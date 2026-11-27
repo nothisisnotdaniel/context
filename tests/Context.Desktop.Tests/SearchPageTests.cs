@@ -351,7 +351,7 @@ public sealed class SearchPageTests : IDisposable
         Assert.False(string.IsNullOrEmpty(id));
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
                 i => i.Arguments[0] is ElementReference r && r.Id == id),
             Wait);
     }

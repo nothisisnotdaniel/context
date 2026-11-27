@@ -406,7 +406,7 @@ public sealed class AppointmentPanelTests : IDisposable
     }
 
     private string? LastFocusId() =>
-        data.Bunit.JSInterop.Invocations.LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus") is
+        data.JsCalls().LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus") is
             { Arguments: [ElementReference target, ..] }
             ? target.Id
             : null;

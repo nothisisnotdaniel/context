@@ -416,7 +416,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
 
     private string? LastFocusId()
     {
-        JSRuntimeInvocation? last = data.Bunit.JSInterop.Invocations
+        JSRuntimeInvocation? last = data.JsCalls()
             .LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus");
         return last is { } call ? Assert.IsType<ElementReference>(call.Arguments[0]).Id : null;
     }

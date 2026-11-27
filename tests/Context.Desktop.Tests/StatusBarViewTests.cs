@@ -15,9 +15,11 @@ public sealed class StatusBarViewTests : IDisposable
 
     private static void AssertOneEmptyBar(IRenderedComponent<Main> cut)
     {
-        IElement footer = Assert.Single(cut.FindAll("footer.status-bar"));
+        Assert.Single(cut.FindAll("footer.status-bar"));
         IElement status = Assert.Single(cut.FindAll("p.main-status"));
-        Assert.Same(footer, status.ParentElement);
+        // The parent by selector, not by instance: a render the page starts by itself between two FindAll calls
+        // gives new element instances (job 491).
+        Assert.True(status.ParentElement!.Matches("footer.status-bar"));
         Assert.True(status.ClassList.Contains("cut"));
         Assert.Equal("status", status.GetAttribute("role"));
         Assert.Equal(string.Empty, status.TextContent);

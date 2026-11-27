@@ -42,7 +42,7 @@ public sealed class TriagePanelTests : IDisposable
 
     private string LastFocusId()
     {
-        JSRuntimeInvocation last = data.Bunit.JSInterop.Invocations.Last(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+        JSRuntimeInvocation last = data.JsCalls().Last(i => i.Identifier == "Blazor._internal.domWrapper.focus");
         return ((ElementReference)last.Arguments[0]!).Id;
     }
 

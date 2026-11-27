@@ -151,19 +151,33 @@ internal sealed class DesktopFixture : IDisposable
 
     public DesktopState? State { get; private set; }
 
+    /// <summary>
+    /// The JS calls recorded so far (of <paramref name="identifier"/>, or all), read on the renderer's dispatcher: a
+    /// component records them there, also after a load the page started by itself, so reading the list from the test
+    /// thread can meet it mid-write ("Collection was modified", job 491). Waits at most
+    /// <see cref="BoundedWait.Dispatcher"/> for the dispatcher.
+    /// </summary>
+    public List<JSRuntimeInvocation> JsCalls(string? identifier = null) =>
+        BoundedWait.Result(
+            Bunit.Renderer.Dispatcher.InvokeAsync(() => Bunit.JSInterop.Invocations
+                .Where(i => identifier is null || i.Identifier == identifier)
+                .ToList()),
+            BoundedWait.Dispatcher,
+            $"DesktopFixture.JsCalls(\"{identifier}\") on the renderer's dispatcher");
+
     /// <summary>Released once per <c>ContextEditor.setTheme</c> call (job 341), so a test awaits a call off the renderer.</summary>
     public SemaphoreSlim ThemeSet { get; } = new SemaphoreSlim(0);
 
     /// <summary>The theme names passed to <c>ContextEditor.setTheme</c> so far, in order.</summary>
     public IReadOnlyList<string> Themes() =>
-        Bunit.JSInterop.Invocations["ContextEditor.setTheme"].Select(i => (string)i.Arguments[0]!).ToList();
+        JsCalls("ContextEditor.setTheme").Select(i => (string)i.Arguments[0]!).ToList();
 
     /// <summary>Released once per <c>ContextEditor.setSidebars</c> call (job 490), so a test awaits a call off the renderer.</summary>
     public SemaphoreSlim SidebarsSet { get; } = new SemaphoreSlim(0);
 
     /// <summary>The (left, right) widths passed to <c>ContextEditor.setSidebars</c> so far, in order.</summary>
     public IReadOnlyList<(int Left, int Right)> Sidebars() =>
-        Bunit.JSInterop.Invocations["ContextEditor.setSidebars"].Select(i => ((int)i.Arguments[0]!, (int)i.Arguments[1]!)).ToList();
+        JsCalls("ContextEditor.setSidebars").Select(i => ((int)i.Arguments[0]!, (int)i.Arguments[1]!)).ToList();
 
     public DesktopActions? Actions { get; private set; }
 

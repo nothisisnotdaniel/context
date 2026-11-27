@@ -421,7 +421,7 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Empty(cut.FindAll("button.search-save"));
         cut.WaitForAssertion(() => Assert.Equal(
             name.GetAttribute("blazor:elementReference"),
-            ((ElementReference)data.Bunit.JSInterop.Invocations["Blazor._internal.domWrapper.focus"][^1].Arguments[0]!).Id), Wait);
+            ((ElementReference)data.JsCalls("Blazor._internal.domWrapper.focus")[^1].Arguments[0]!).Id), Wait);
 
         await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "  My   budget " });
         await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -700,7 +700,7 @@ public sealed class SearchPanelTests : IDisposable
             ? (ElementReference)Field(cut, "input")
             : ((ElementReference[])Field(cut, "rowButtons"))[int.Parse(selector[(selector.IndexOf('(') + 1)..selector.IndexOf(')')], CultureInfo.InvariantCulture) - 1];
         Assert.False(string.IsNullOrEmpty(target.Id));
-        return data.Bunit.JSInterop.Invocations.Count(i =>
+        return data.JsCalls().Count(i =>
             i.Identifier == "Blazor._internal.domWrapper.focus" && i.Arguments[0] is ElementReference r && r.Id == target.Id);
     }
 

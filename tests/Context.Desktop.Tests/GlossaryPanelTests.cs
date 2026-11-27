@@ -135,19 +135,15 @@ public sealed class GlossaryPanelTests : IDisposable
         data.WriteNote("Plan", "type:: person\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
-        object gate = DesktopFixture.IndexGate(data.State!);
 
-        Monitor.Enter(gate);
-        try
+        // The gate is held on a thread of its own: this test awaits while holding it (job 491: a Monitor entered here
+        // and left after the await could be left on another thread, which kept the gate held and hung the run).
+        using (GateHold.Take(DesktopFixture.IndexGate(data.State!)))
         {
             await RunPalette(cut, "/glossary");
             IElement loading = cut.Find(".glossary-panel p[role=status]");
             Assert.Equal("Loading…", loading.TextContent);
             Assert.True(loading.ClassList.Contains("grey"));
-        }
-        finally
-        {
-            Monitor.Exit(gate);
         }
 
         cut.WaitForAssertion(

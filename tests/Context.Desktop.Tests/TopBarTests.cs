@@ -74,9 +74,13 @@ public sealed class TopBarTests : IDisposable
 
     private string? LastFocusId()
     {
-        IReadOnlyList<JSRuntimeInvocation> calls = context.JSInterop.Invocations
-            .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
-            .ToList();
+        // Read on the renderer's dispatcher, where the calls are recorded (job 491).
+        IReadOnlyList<JSRuntimeInvocation> calls = BoundedWait.Result(
+            context.Renderer.Dispatcher.InvokeAsync(() => context.JSInterop.Invocations
+                .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
+                .ToList()),
+            BoundedWait.Dispatcher,
+            "TopBarTests.LastFocusId on the renderer's dispatcher");
         if (calls.Count == 0)
         {
             return null;

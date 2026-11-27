@@ -1429,7 +1429,7 @@ public sealed class MainTests : IDisposable
         Assert.False(string.IsNullOrEmpty(id));
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
                 i => i.Arguments[0] is ElementReference r && r.Id == id),
             Wait);
     }
@@ -3418,7 +3418,7 @@ public sealed class MainTests : IDisposable
 
     // The element ids the focus went to, in order.
     private string[] FocusIds() =>
-        data.Bunit.JSInterop.Invocations
+        data.JsCalls()
             .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus" && i.Arguments[0] is ElementReference)
             .Select(i => ((ElementReference)i.Arguments[0]!).Id)
             .ToArray();
@@ -4807,7 +4807,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("true", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
                 i => i.Arguments[0] is ElementReference r && r.Id == input.GetAttribute("blazor:elementReference")),
             Wait);
     }

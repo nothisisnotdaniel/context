@@ -77,13 +77,15 @@ public sealed class SimilarPanelTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await ShowAsync(cut);
 
-        await cut.FindAll(".similar-rows .note-button")[1].ClickAsync(new MouseEventArgs());
+        // Main renders again by itself (its own loads), which can drop the handler of a button found before that
+        // render (job 491), so the click finds the button again then.
+        await StaleClick.ClickAsync(cut, ".similar-rows .note-button[title=\"Project plans\"]");
 
         cut.WaitForAssertion(() => Assert.Equal("Project plans", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".similar-panel"));
 
         await ShowAsync(cut);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".similar-panel")), Wait);
     }
@@ -269,7 +271,7 @@ public sealed class SimilarPanelTests : IDisposable
     }
 
     // The FocusAsync calls so far (ConfirmDialog focuses its Cancel button when it opens).
-    private int Focuses() => data.Bunit.JSInterop.Invocations.Count(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+    private int Focuses() => data.JsCalls().Count(i => i.Identifier == "Blazor._internal.domWrapper.focus");
 
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 }

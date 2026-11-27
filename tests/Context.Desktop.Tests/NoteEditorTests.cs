@@ -658,7 +658,7 @@ public sealed class NoteEditorTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
-        int calls = data.Bunit.JSInterop.Invocations.Count;
+        int calls = data.JsCalls().Count;
         List<bool> raised = [];
         js.Page().DirtyChanged += value =>
         {
@@ -669,7 +669,7 @@ public sealed class NoteEditorTests : IDisposable
         await cut.InvokeAsync(() => js.Page().OnDirty(true));
 
         Assert.Equal([true], raised);
-        Assert.Equal(calls, data.Bunit.JSInterop.Invocations.Count);
+        Assert.Equal(calls, data.JsCalls().Count);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Single(cut.FindAll(".dirty-dot"));
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
@@ -718,7 +718,7 @@ public sealed class NoteEditorTests : IDisposable
     }
 
     private EditorInterop PageOf(IRenderedComponent<NoteEditor> cut) =>
-        ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.Bunit.JSInterop.Invocations
+        ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.JsCalls()
             .Last(i => i.Identifier == "ContextEditor.mount").Arguments[2]!).Value;
 
     // 202 AC-7: the page editor gets the note's name as mount's 5th argument (210: isLossless is never asked).

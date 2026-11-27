@@ -92,7 +92,7 @@ public sealed class TodoEntryTests : IDisposable
         await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Single(data.Todos!.List());
-        Assert.Contains(data.Bunit.JSInterop.Invocations, i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(data.JsCalls(), i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
     }
 
     // While a todo is being added the whole row and the todo checkboxes are disabled.

@@ -14,9 +14,6 @@ public sealed class QuickSwitcherTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
-    // The layout's element reference id, read in the first render (later renders leave the attribute empty).
-    private string? layoutId;
-
     public void Dispose() => data.Dispose();
 
     // AC-4: Ctrl+P or Cmd+P on the layout opens the dialog with its input focused.
@@ -38,7 +35,7 @@ public sealed class QuickSwitcherTests : IDisposable
         Assert.Equal("Note name", input.GetAttribute("aria-label"));
         Assert.Equal("Type a note name", input.GetAttribute("placeholder"));
         Assert.Equal("listbox", cut.Find(".switcher ul").GetAttribute("role"));
-        AssertFocused(cut, ".switcher-input");
+        AssertFocused<QuickSwitcher>(cut, "input");
     }
 
     // AC-4: Ctrl/Cmd+P from the note editor opens it too.
@@ -175,7 +172,7 @@ public sealed class QuickSwitcherTests : IDisposable
 
         await WaitOpened(cut, js, "Other");
         Assert.Empty(cut.FindAll(".switcher"));
-        AssertFocused(cut, ".layout");
+        AssertFocused<Main>(cut, "layout");
         data.WaitForRecentWrites();
         Assert.Equal(["Other", "Plan"], new RecentNotesStore(data.Root).Read());
     }
@@ -224,7 +221,7 @@ public sealed class QuickSwitcherTests : IDisposable
 
         Assert.Empty(cut.FindAll(".switcher"));
         Assert.Empty(cut.FindAll(".note-title"));
-        AssertFocused(cut, ".layout");
+        AssertFocused<Main>(cut, "layout");
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
@@ -319,7 +316,6 @@ public sealed class QuickSwitcherTests : IDisposable
     private async Task<IRenderedComponent<Main>> OpenSwitcher()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        layoutId = cut.Find(".layout").GetAttribute("blazor:elementReference");
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "p", CtrlKey = true });
         Assert.Single(cut.FindAll(".dialog.switcher"));
         return cut;
@@ -358,14 +354,23 @@ public sealed class QuickSwitcherTests : IDisposable
         return Task.CompletedTask;
     }
 
-    // Waits until the element the selector finds (read in the render that created it) was given the focus.
-    private void AssertFocused(IRenderedComponent<Main> cut, string selector)
+    // Waits until the element held in the ElementReference field of the shown TComponent was given the focus. The id
+    // is read from the field, not from the markup: only the render that created an element carries its
+    // blazor:elementReference attribute, and a later render (a load the page started by itself) leaves it empty
+    // (job 491: under load the id was read empty and the test failed).
+    private void AssertFocused<TComponent>(IRenderedComponent<Main> cut, string field)
+        where TComponent : IComponent
     {
-        string? id = selector == ".layout" ? layoutId : cut.Find(selector).GetAttribute("blazor:elementReference");
+        string id = BoundedWait.Result(
+            cut.InvokeAsync(() => ((ElementReference)typeof(TComponent)
+                .GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .GetValue(cut.Instance is TComponent self ? self : cut.FindComponent<TComponent>().Instance)!).Id),
+            BoundedWait.Dispatcher,
+            $"QuickSwitcherTests reading {typeof(TComponent).Name}.{field} on the renderer's dispatcher");
         Assert.False(string.IsNullOrEmpty(id));
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
                 i => i.Arguments[0] is ElementReference r && r.Id == id),
             Wait);
     }

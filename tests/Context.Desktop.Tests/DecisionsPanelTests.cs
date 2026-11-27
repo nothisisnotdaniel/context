@@ -155,7 +155,7 @@ public sealed class DecisionsPanelTests : IDisposable
 
         Assert.Equal(
             ["#!d1234", "#!dzz99-4"],
-            data.Bunit.JSInterop.Invocations["ContextEditor.copyToClipboard"].Select(i => (string)i.Arguments[0]!));
+            data.JsCalls("ContextEditor.copyToClipboard").Select(i => (string)i.Arguments[0]!));
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
