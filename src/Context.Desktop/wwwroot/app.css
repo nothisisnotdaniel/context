@@ -252,7 +252,7 @@ ol {
 .layout.left-collapsed > .notes-region,
 .layout.right-collapsed > .todos-region {
     overflow: hidden;
-    padding: 8px 4px;
+    padding: 8px 3px;
 }
 
 .layout.left-collapsed > .notes-region .sidebar-head,
