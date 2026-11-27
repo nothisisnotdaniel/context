@@ -2469,3 +2469,4 @@ Every factory agent reads this file before working on Context. Keep it short and
 
 ## Lessons
 - Guard async UI work against disposal: set a disposed flag in Dispose, check it before InvokeAsync or StateHasChanged, and catch exceptions in fire-and-forget tasks.
+- Wrap new comment and doc lines to the width of the lines around them; never leave one very long line.
