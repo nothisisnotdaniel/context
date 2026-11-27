@@ -333,7 +333,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#472](backlog/472-check-the-screenshot-capture-on-macos.md) Check the screenshot capture on macOS
 - [h] [#473](backlog/473-check-the-screenshot-capture-on-windows.md) Check the screenshot capture on Windows
 - [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
-- [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
+- [ ] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
 - [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
 - [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
 - [h] [#474](backlog/474-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS
