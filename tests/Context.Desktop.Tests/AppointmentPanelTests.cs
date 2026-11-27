@@ -322,7 +322,7 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await ClickItem(cut, 0);
         WaitForPage(cut);
-        Assert.Empty(cut.FindAll(".appointment-page .note-button"));
+        Assert.Empty(cut.FindAll(".appointment-page .appointment-notes .note-button"));
         IElement link = cut.Find(".appointment-page button.create-note-link");
         Assert.Equal("Create a new note", link.TextContent);
         Assert.Equal("button", link.GetAttribute("type"));
@@ -355,7 +355,7 @@ public sealed class AppointmentPanelTests : IDisposable
         IElement line = cut.Find(".appointment-page p.red");
         Assert.Equal("Can't read the related notes.", line.TextContent);
         Assert.Empty(cut.FindAll(".appointment-page .create-note-link"));
-        Assert.Empty(cut.FindAll(".appointment-page .note-button"));
+        Assert.Empty(cut.FindAll(".appointment-page .appointment-notes .note-button"));
         Assert.Equal(3, cut.FindAll(".day-appointments .appointment-item").Count);
     }
 
@@ -870,7 +870,7 @@ public sealed class AppointmentPanelTests : IDisposable
     private Task ClickItem(IRenderedComponent<Main> cut, int index) => Click(cut, () => Item(cut, index));
 
     private static (string Text, string? Title, string Matches)[] Notes(IRenderedComponent<Main> cut) =>
-        cut.FindAll(".appointment-page li")
+        cut.FindAll(".appointment-page ul.appointment-notes li")
             .Select(li => (li.QuerySelector(".note-button")!.TextContent, li.QuerySelector(".note-button")!.GetAttribute("title"), li.QuerySelector(".matches")!.TextContent))
             .ToArray();
 
@@ -1130,5 +1130,193 @@ public sealed class AppointmentPanelTests : IDisposable
     {
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         await cut.InvokeAsync(act);
+    }
+
+    // Job 483: two Budget appointments with an organizer and required and optional attendees (Cy is optional in the
+    // first and required in the second), and a Retro with nobody. Every value is an @x.org address.
+    private void WritePeopleDay() =>
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Budget", "20261029T110000", "20261029T120000").Replace(
+                "END:VEVENT",
+                "ORGANIZER;CN=\"Ann Lee\":mailto:ann@x.org\r\n"
+                + "ATTENDEE;ROLE=REQ-PARTICIPANT;CN=Bob:mailto:bob@x.org\r\n"
+                + "ATTENDEE;ROLE=OPT-PARTICIPANT;CN=Cy:mailto:cy@x.org\r\n"
+                + "END:VEVENT",
+                StringComparison.Ordinal),
+            Event("Retro", "20261029T130000", "20261029T140000"),
+            DesktopFixture.Event("Budget", "20261029T150000", "20261029T160000").Replace(
+                "END:VEVENT",
+                "ATTENDEE;CN=cy:mailto:cy2@x.org\r\n"
+                + "ATTENDEE;ROLE=OPT-PARTICIPANT;CN=Dee:mailto:dee@x.org\r\n"
+                + "END:VEVENT",
+                StringComparison.Ordinal)));
+
+    // (name, title, role) of each People row.
+    private static (string Name, string? Title, string Role)[] PeopleRows(IRenderedComponent<AppointmentPanel> cut) =>
+        cut.FindAll(".appointment-page section.appointment-people li.meeting-person")
+            .Select(li => (
+                li.QuerySelector("button")!.TextContent,
+                li.QuerySelector("button")!.GetAttribute("title"),
+                li.QuerySelector("span.role")!.TextContent))
+            .ToArray();
+
+    // ".appointment-page shows no Loading…, its .meeting-todos has h3 Todos and section.appointment-people is shown".
+    private static void WaitForPeople(IRenderedComponent<AppointmentPanel> cut)
+    {
+        WaitForMeetingTodos(cut);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page section.appointment-people")), Wait);
+    }
+
+    // Job 483 AC-4, AC-7, AC-8: People sits between the panel bar and Topics, its h3 labels its list, and each row is
+    // a person link (text and title through OneLine) with its grey role: organizer, required, then optional.
+    [Fact]
+    public async Task People_ByRole_BetweenBarAndTopics()
+    {
+        WritePeopleDay();
+        data.WriteNote("Plan", "next: @[Bob] travel\n");
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Budget");
+        WaitForPeople(cut);
+
+        IElement section = cut.Find(".appointment-page section.appointment-people");
+        IElement heading = section.QuerySelector("h3")!;
+        Assert.Equal("People", heading.TextContent);
+        Assert.False(string.IsNullOrEmpty(heading.Id));
+        Assert.Equal(heading.Id, section.GetAttribute("aria-labelledby"));
+        Assert.Equal(heading.Id, section.QuerySelector("ul")!.GetAttribute("aria-labelledby"));
+        Assert.True(Before(cut.Find(".appointment-page .panel-bar"), section));
+        Assert.True(Before(section, cut.Find(".appointment-page section.topics")));
+        Assert.Equal(
+            [("Ann Lee", "Ann Lee", "Organizer"), ("Bob", "Bob", "Required"), ("Cy", "Cy", "Required"), ("Dee", "Dee", "Optional")],
+            PeopleRows(cut));
+        foreach (IElement li in cut.FindAll(".appointment-page li.meeting-person"))
+        {
+            IElement button = li.QuerySelector("button")!;
+            Assert.Equal("button", button.GetAttribute("type"));
+            Assert.Contains("person-link", button.ClassList);
+            Assert.Contains("note-button", button.ClassList);
+            Assert.Contains("cut", button.ClassList);
+            Assert.Contains("grey", li.QuerySelector("span.role")!.ClassList);
+        }
+    }
+
+    // Job 483 AC-8: an appointment with nobody shows no People section, and none shows while Loading… does.
+    [Fact]
+    public async Task People_None_NoSection()
+    {
+        WritePeopleDay();
+        await data.RefreshAsync();
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Retro")
+            .Add(c => c.Day, DesktopFixture.Today));
+        if (cut.Find(".appointment-page").TextContent.Contains("Loading…", StringComparison.Ordinal))
+        {
+            Assert.Empty(cut.FindAll(".appointment-page section.appointment-people"));
+        }
+
+        WaitForMeetingTodos(cut);
+
+        Assert.Empty(cut.FindAll(".appointment-page section.appointment-people"));
+    }
+
+    // Job 483 AC-7: People is read before the index, so a bad context.db still shows it next to the red line.
+    [Fact]
+    public async Task People_CorruptIndex_StillShown()
+    {
+        WritePeopleDay();
+        data.WriteFile(TagIndex.FileName, NotADatabase);
+        await data.RefreshAsync();
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Budget")
+            .Add(c => c.Day, DesktopFixture.Today));
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't read the related notes.", cut.Find(".appointment-page p.red").TextContent), Wait);
+        WaitForPeople(cut);
+
+        Assert.Equal(["Ann Lee", "Bob", "Cy", "Dee"], PeopleRows(cut).Select(r => r.Name));
+        AppointmentPageView view = await data.State!.AppointmentPage("Budget", DesktopFixture.Today).WaitAsync(Wait);
+        Assert.True(view.IndexUnreadable);
+        Assert.Equal(4, view.People.Count);
+    }
+
+    // Job 483 AC-7: with Outlook on, its appointments of the title join the files' people; Outlook's optional
+    // attendees are optional.
+    [Fact]
+    public async Task People_OutlookOn_JoinsFilePeople()
+    {
+        WritePeopleDay();
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.Outlook.Days[DesktopFixture.Today] =
+        [
+            new Appointment(
+                "Budget", null, new DateTime(2026, 10, 29, 17, 0, 0), new DateTime(2026, 10, 29, 18, 0, 0), false,
+                ["Eve", "Fay"], "Olga", ["Fay"]),
+        ];
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Budget");
+        WaitForPeople(cut);
+
+        Assert.Equal(
+            [("Ann Lee", "Organizer"), ("Bob", "Required"), ("Cy", "Required"), ("Eve", "Required"), ("Dee", "Optional"), ("Fay", "Optional")],
+            PeopleRows(cut).Select(r => (r.Name, r.Role)));
+    }
+
+    // Job 483 AC-9: a click on a person link calls OnPerson with the raw name.
+    [Fact]
+    public async Task People_Click_CallsOnPersonWithName()
+    {
+        WritePeopleDay();
+        await data.RefreshAsync();
+        List<string> asked = [];
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Budget")
+            .Add(c => c.Day, DesktopFixture.Today)
+            .Add(c => c.OnPerson, (string name) => asked.Add(name)));
+        WaitForPeople(cut);
+
+        await Act(cut, () => cut.FindAll(".appointment-page li.meeting-person button.person-link")[2].ClickAsync(new MouseEventArgs()));
+
+        Assert.Equal(["Cy"], asked);
+    }
+
+    // Job 483 AC-9: in Main a person link goes to OpenMention: a dirty editor asks Discard changes to <name>? first,
+    // then the person page opens.
+    [Fact]
+    public async Task People_Main_DirtyEditor_AsksThenOpensPerson()
+    {
+        WritePeopleDay();
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await RenderMain();
+        await OpenFromList(cut, js, "Plan");
+        await ClickItem(cut, 0);
+        WaitForPage(cut);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page section.appointment-people")), Wait);
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
+
+        await Click(cut, () => cut.FindAll(".appointment-page button.person-link")[0]);
+        cut.WaitForAssertion(
+            () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent),
+            Wait);
+        Assert.False(File.Exists(Path.Combine(data.Root, "people", "Ann Lee.md")));
+        await Click(cut, () => cut.Find("[role=dialog] button.confirm"));
+
+        cut.WaitForAssertion(() => Assert.Equal("Ann Lee", cut.Find(".note-title").TextContent), Wait);
+        Assert.True(File.Exists(Path.Combine(data.Root, "people", "Ann Lee.md")));
+    }
+
+    // Job 483 AC-10: no address from an ORGANIZER/ATTENDEE value reaches the markup or the view's text.
+    [Fact]
+    public async Task People_NoAddressInMarkup()
+    {
+        WritePeopleDay();
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Budget");
+        WaitForPeople(cut);
+
+        Assert.DoesNotContain("@x.org", cut.Markup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("mailto", cut.Markup, StringComparison.OrdinalIgnoreCase);
+        AppointmentPageView view = await data.State!.AppointmentPage("Budget", DesktopFixture.Today).WaitAsync(Wait);
+        Assert.Equal("AppointmentPageView", view.ToString());
+        Assert.Equal("MeetingPerson", view.People[0].ToString());
+        Assert.DoesNotContain(view.People, p => p.Name.Contains('@', StringComparison.Ordinal));
     }
 }

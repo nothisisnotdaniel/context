@@ -21,7 +21,7 @@ public sealed class MeetingLinkTests
     };
 
     private static Appointment At(DateTime start, string? uid = "abc", string title = "Weekly sync") =>
-        new(title, null, start, start.AddHours(1), false, null, uid);
+        new(title, null, start, start.AddHours(1), false, uid: uid);
 
     private static MeetingLink Link(DateTime start) => MeetingLink.For(At(start))!;
 

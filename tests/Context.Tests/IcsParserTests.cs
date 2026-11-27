@@ -309,9 +309,131 @@ public sealed class IcsParserTests
     [Fact]
     public void Appointment_ToString_OnlyTypeName()
     {
-        Appointment appointment = new("secret", "room", new DateTime(2026, 11, 16, 10, 0, 0), new DateTime(2026, 11, 16, 11, 0, 0), false, ["Anna"], "uid-secret");
+        Appointment appointment = new("secret", "room", new DateTime(2026, 11, 16, 10, 0, 0), new DateTime(2026, 11, 16, 11, 0, 0), false, ["Anna"], uid: "uid-secret");
 
         Assert.Equal("Appointment", appointment.ToString());
         Assert.Equal("Appointment", $"{appointment}");
+    }
+
+    // Job 483: no field of an appointment holds the ORGANIZER/ATTENDEE value (the mailto: address).
+    private static void AssertNoAddress(Appointment a)
+    {
+        string[] fields =
+        [
+            a.Title, a.Location ?? string.Empty, a.Organizer ?? string.Empty, a.Uid ?? string.Empty,
+            .. a.Attendees, .. a.OptionalAttendees,
+        ];
+        Assert.DoesNotContain(fields, f => f.Contains("mailto", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(fields, f => f.Contains("@x.org", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Job 483 AC-1: ORGANIZER's quoted CN is the organizer; the value is never read.
+    [Fact]
+    public void Parse_Organizer_QuotedCn()
+    {
+        Appointment a = Single(Event(
+            "SUMMARY:Plan", "DTSTART:20261029T080000Z", "ORGANIZER;CN=\"Ann Lee\":mailto:ann@x.org"));
+
+        Assert.Equal("Ann Lee", a.Organizer);
+        Assert.Empty(a.Attendees);
+        AssertNoAddress(a);
+    }
+
+    // Job 483 AC-1: the CN is unescaped and normalized as for attendees.
+    [Fact]
+    public void Parse_Organizer_EscapedCn_Normalized()
+    {
+        Appointment a = Single(Event(
+            "DTSTART:20261029T080000Z", "ORGANIZER;CN=\"  Lee\\,   Ann \";SENT-BY=\"mailto:b@x.org\":mailto:ann@x.org"));
+
+        Assert.Equal("Lee, Ann", a.Organizer);
+        AssertNoAddress(a);
+    }
+
+    // Job 483 AC-1: a missing or invalid CN gives no organizer; the first valid ORGANIZER wins.
+    [Theory]
+    [InlineData(null, "ORGANIZER:mailto:ann@x.org")]
+    [InlineData(null, "ORGANIZER;CN=\"\":mailto:ann@x.org")]
+    [InlineData(null, "ORGANIZER;CN=\"a/b\":mailto:ann@x.org")]
+    [InlineData("Bob Ray", "ORGANIZER:mailto:ann@x.org", "ORGANIZER;CN=Bob Ray:mailto:bob@x.org", "ORGANIZER;CN=Cy:mailto:cy@x.org")]
+    [InlineData("Ann Lee", "ORGANIZER;CN=Ann Lee:mailto:ann@x.org", "ORGANIZER;CN=Bob Ray:mailto:bob@x.org")]
+    public void Parse_Organizer_FirstValidWins(string? expected, params string[] organizers)
+    {
+        Appointment a = Single(Event(["DTSTART:20261029T080000Z", .. organizers]));
+
+        Assert.Equal(expected, a.Organizer);
+        AssertNoAddress(a);
+    }
+
+    // Job 483 AC-2: OPT-PARTICIPANT and NON-PARTICIPANT (trimmed, any case) are optional; every other role, and none,
+    // is required. Attendees keeps every name in file order.
+    [Fact]
+    public void Parse_Roles_OptionalSubsetInFileOrder()
+    {
+        Appointment a = Single(Event(
+            "DTSTART:20261029T080000Z",
+            "ATTENDEE;ROLE=CHAIR;CN=Chair:mailto:c@x.org",
+            "ATTENDEE;ROLE=OPT-PARTICIPANT;CN=Opt:mailto:o@x.org",
+            "ATTENDEE;ROLE=REQ-PARTICIPANT;CN=Req:mailto:r@x.org",
+            "ATTENDEE;ROLE=\" non-participant \";CN=Non:mailto:n@x.org",
+            "ATTENDEE;CN=NoRole:mailto:x@x.org",
+            "ATTENDEE;ROLE=opt-participant;CN=Lower:mailto:l@x.org",
+            "ATTENDEE;ROLE=X-OTHER;CN=Other:mailto:z@x.org",
+            "ATTENDEE;ROLE=OPT-PARTICIPANT:mailto:nocn@x.org"));
+
+        Assert.Equal(["Chair", "Opt", "Req", "Non", "NoRole", "Lower", "Other"], a.Attendees);
+        Assert.Equal(["Opt", "Non", "Lower"], a.OptionalAttendees);
+        Assert.Null(a.Organizer);
+        AssertNoAddress(a);
+    }
+
+    // Job 483 AC-1, AC-2: Organizer and OptionalAttendees are part of Equals; a hand-built appointment has neither.
+    [Fact]
+    public void Appointment_Equals_IncludesOrganizerAndOptional()
+    {
+        DateTime at = new DateTime(2026, 10, 29, 9, 0, 0);
+        Appointment plain = new Appointment("T", null, at, at, false, ["A", "B"]);
+
+        Assert.Null(plain.Organizer);
+        Assert.Empty(plain.OptionalAttendees);
+        Assert.Equal(plain, new Appointment("T", null, at, at, false, ["A", "B"], uid: "u"));
+        Assert.NotEqual(plain, new Appointment("T", null, at, at, false, ["A", "B"], "A"));
+        Assert.NotEqual(plain, new Appointment("T", null, at, at, false, ["A", "B"], optionalAttendees: ["B"]));
+        Assert.Equal(
+            new Appointment("T", null, at, at, false, ["A", "B"], "O", ["B"]),
+            new Appointment("T", null, at, at, false, ["A", "B"], "O", ["B"]));
+    }
+
+    // Job 483 AC-3: every occurrence of a series has the series' organizer and optional attendees; an override has its own.
+    [Fact]
+    public void Parse_Series_OccurrencesCarryPeople_OverrideHasOwn()
+    {
+        string text = WeeklyWith(
+            [
+                "ORGANIZER;CN=Ann Lee:mailto:ann@x.org",
+                "ATTENDEE;CN=Bob:mailto:bob@x.org",
+                "ATTENDEE;ROLE=OPT-PARTICIPANT;CN=Cy:mailto:cy@x.org",
+            ],
+            [
+                "SUMMARY:Moved", "DTSTART:20261013T150000",
+                "ORGANIZER;CN=Dee:mailto:dee@x.org",
+                "ATTENDEE;ROLE=OPT-PARTICIPANT;CN=Bob:mailto:bob@x.org",
+            ]);
+
+        foreach (int day in new[] { 6, 20, 27 })
+        {
+            Appointment occurrence = Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, day)));
+            Assert.Equal("Ann Lee", occurrence.Organizer);
+            Assert.Equal(["Bob", "Cy"], occurrence.Attendees);
+            Assert.Equal(["Cy"], occurrence.OptionalAttendees);
+            AssertNoAddress(occurrence);
+        }
+
+        Appointment moved = Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 13)));
+        Assert.Equal("Moved", moved.Title);
+        Assert.Equal("Dee", moved.Organizer);
+        Assert.Equal(["Bob"], moved.Attendees);
+        Assert.Equal(["Bob"], moved.OptionalAttendees);
+        AssertNoAddress(moved);
     }
 }

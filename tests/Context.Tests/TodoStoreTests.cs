@@ -1725,7 +1725,7 @@ public sealed class TodoStoreTests : IDisposable
     public void LongestUid_RoundTrips()
     {
         string uid = new string('u', MeetingLink.MaxUidLength);
-        MeetingLink link = MeetingLink.For(new Appointment("T", null, new DateTime(2026, 11, 20, 10, 0, 0), new DateTime(2026, 11, 20, 11, 0, 0), false, null, uid))!;
+        MeetingLink link = MeetingLink.For(new Appointment("T", null, new DateTime(2026, 11, 20, 10, 0, 0), new DateTime(2026, 11, 20, 11, 0, 0), false, uid: uid))!;
         TodoStore store = new TodoStore(root, () => Start, () => IdA);
 
         store.Add("a", link.Day, null, null, link);

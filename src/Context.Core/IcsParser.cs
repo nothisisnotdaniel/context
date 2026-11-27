@@ -12,6 +12,8 @@ internal sealed record Appointment
     /// <param name="end">End in the local zone (all-day events: midnight after the last day, exclusive).</param>
     /// <param name="allDay">True for a <c>VALUE=DATE</c> start.</param>
     /// <param name="attendees">The <c>CN</c> names of the <c>ATTENDEE</c>s; none when left out.</param>
+    /// <param name="organizer">The <c>CN</c> name of the <c>ORGANIZER</c>; <c>null</c> when left out.</param>
+    /// <param name="optionalAttendees">The optional ones of <paramref name="attendees"/>; none when left out.</param>
     /// <param name="uid">The event's <c>UID</c> (or Outlook's <c>outlook:</c> id); <c>null</c> without one.</param>
     public Appointment(
         string title,
@@ -20,6 +22,8 @@ internal sealed record Appointment
         DateTime end,
         bool allDay,
         IReadOnlyList<string>? attendees = null,
+        string? organizer = null,
+        IReadOnlyList<string>? optionalAttendees = null,
         string? uid = null)
     {
         Title = title;
@@ -28,6 +32,8 @@ internal sealed record Appointment
         End = end;
         AllDay = allDay;
         Attendees = attendees ?? [];
+        Organizer = organizer;
+        OptionalAttendees = optionalAttendees ?? [];
         Uid = uid;
     }
 
@@ -54,6 +60,18 @@ internal sealed record Appointment
     public IReadOnlyList<string> Attendees { get; }
 
     /// <summary>
+    /// The name (<c>CN</c> parameter) of the event's first <c>ORGANIZER</c> with a valid one, unescaped and normalized
+    /// like an attendee; <c>null</c> without one. The organizer's address (the property value) is never read.
+    /// </summary>
+    public string? Organizer { get; }
+
+    /// <summary>
+    /// The attendees whose <c>ROLE</c> is <c>OPT-PARTICIPANT</c> or <c>NON-PARTICIPANT</c> (Outlook: its optional
+    /// attendees), a subset of <see cref="Attendees"/> in the same order. Every other attendee counts as required.
+    /// </summary>
+    public IReadOnlyList<string> OptionalAttendees { get; }
+
+    /// <summary>
     /// The event's trimmed <c>UID</c> (the same on every occurrence and override of a series), or for Outlook
     /// <c>outlook:</c> + its global id; <c>null</c> without one. Untrusted outside text, never shown. Not part of
     /// <see cref="Equals(Appointment?)"/> or <see cref="GetHashCode"/>.
@@ -63,7 +81,10 @@ internal sealed record Appointment
     /// <summary>Only the type name, so the Uid and the calendar text never leak through formatting.</summary>
     public override string ToString() => nameof(Appointment);
 
-    /// <summary>Equal when every field but <see cref="Uid"/> is, with <see cref="Attendees"/> compared name by name (ordinal).</summary>
+    /// <summary>
+    /// Equal when every field but <see cref="Uid"/> is, with <see cref="Attendees"/> and
+    /// <see cref="OptionalAttendees"/> compared name by name (ordinal).
+    /// </summary>
     public bool Equals(Appointment? other) =>
         other is not null
         && string.Equals(Title, other.Title, StringComparison.Ordinal)
@@ -71,14 +92,16 @@ internal sealed record Appointment
         && Start == other.Start
         && End == other.End
         && AllDay == other.AllDay
-        && Attendees.SequenceEqual(other.Attendees, StringComparer.Ordinal);
+        && Attendees.SequenceEqual(other.Attendees, StringComparer.Ordinal)
+        && string.Equals(Organizer, other.Organizer, StringComparison.Ordinal)
+        && OptionalAttendees.SequenceEqual(other.OptionalAttendees, StringComparer.Ordinal);
 
     public override int GetHashCode() => HashCode.Combine(Title, Location, Start, End, AllDay, Attendees.Count);
 }
 
 /// <summary>
 /// Reads the part of iCalendar (RFC 5545) that <c>/current</c> and the person pages need: the <c>SUMMARY</c>,
-/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c>, <c>CLASS</c> and <c>ATTENDEE</c> names of each
+/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c>, <c>CLASS</c>, <c>ORGANIZER</c> name and <c>ATTENDEE</c> names and roles of each
 /// <c>VEVENT</c>, and
 /// for <see cref="Parse(string, TimeZoneInfo, DateOnly)"/> its recurrence (<c>UID</c>, <c>RRULE</c> through
 /// <see cref="RecurrenceRule"/>, <c>RDATE</c>, <c>EXDATE</c>, <c>RECURRENCE-ID</c>). Everything else, including
@@ -300,7 +323,7 @@ internal static class IcsParser
                 continue;
             }
 
-            result.Add(new Appointment(first.Title, first.Location, start, start + duration, first.AllDay, first.Attendees, first.Uid));
+            result.Add(new Appointment(first.Title, first.Location, start, start + duration, first.AllDay, first.Attendees, first.Organizer, first.OptionalAttendees, first.Uid));
         }
 
         return result;
@@ -721,7 +744,9 @@ internal static class IcsParser
         private ContentLine? end;
         private bool cancelled;
         private bool isPrivate;
+        private string? organizer;
         private readonly List<string> attendees = [];
+        private readonly List<string> optionalAttendees = [];
         private readonly List<string> rules = [];
         private readonly List<ContentLine> recurrenceDates = [];
         private readonly List<ContentLine> exceptionDates = [];
@@ -811,6 +836,19 @@ internal static class IcsParser
                 if (name is not null)
                 {
                     attendees.Add(name);
+                    if (IsOptional(content.Parameter("ROLE")))
+                    {
+                        optionalAttendees.Add(name);
+                    }
+                }
+            }
+            else if (content.Is("ORGANIZER"))
+            {
+                // Only the CN name, as for attendees; the first valid one wins.
+                if (organizer is null)
+                {
+                    string? common = content.Parameter("CN");
+                    organizer = common is null ? null : PersonParser.Normalize(Unescape(common));
                 }
             }
             else if (content.Is("STATUS"))
@@ -826,6 +864,19 @@ internal static class IcsParser
                     isPrivate = true;
                 }
             }
+        }
+
+        /// <summary><c>OPT-PARTICIPANT</c> or <c>NON-PARTICIPANT</c> (trimmed, ignoring case); anything else is required.</summary>
+        private static bool IsOptional(string? role)
+        {
+            if (role is null)
+            {
+                return false;
+            }
+
+            string value = role.Trim();
+            return value.Equals("OPT-PARTICIPANT", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("NON-PARTICIPANT", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -872,7 +923,7 @@ internal static class IcsParser
                 return null;
             }
 
-            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay, attendees, Uid);
+            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay, attendees, organizer, optionalAttendees, Uid);
         }
     }
 
