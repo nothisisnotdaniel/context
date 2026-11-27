@@ -6,13 +6,31 @@
    appointment page Meetings/<title part> (job 397, DesktopActions.CreateAppointmentNote) and hands its name to
    OnCreated. It reloads whenever the state changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
    the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. Below them, the
-   todos tied to these appointments (job 287, MeetingTodosPanel). *@
+   todos tied to these appointments (job 287, MeetingTodosPanel). At the top, the appointments' people by role (job 483),
+   each a person link that hands its name to OnPerson. *@
 
 <section class="page appointment-page" aria-label="Appointment">
     <div class="panel-bar">
         <h2 class="cut" title="@Heading">@Heading</h2>
         <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
     </div>
+    @if (view is { People.Count: > 0 })
+    {
+        <section class="appointment-people" aria-labelledby="appointment-people-heading">
+            <h3 id="appointment-people-heading">People</h3>
+            <ul aria-labelledby="appointment-people-heading">
+                @foreach (MeetingPerson person in view.People)
+                {
+                    string name = person.Name;
+                    string shownPerson = DesktopText.OneLine(name);
+                    <li class="meeting-person">
+                        <button type="button" class="person-link note-button cut" title="@shownPerson" @onclick="() => OnPerson.InvokeAsync(name)">@shownPerson</button>
+                        <span class="role grey">@RoleText(person.Role)</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
     @if (view is { IndexUnreadable: false, Topics.Count: > 0 })
     {
         <section class="topics" aria-labelledby="appointment-topics-heading">
@@ -126,6 +144,13 @@
     /// <summary>Called with a related note's full name when it is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>
+    /// Called with a person's raw name when their link in People is clicked (job 483); Main opens the person page like
+    /// a clicked mention.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
 
     /// <summary>
     /// Called when the create link is clicked; Main makes the meeting note of the day's first appointment with the
@@ -324,6 +349,14 @@
             askingTopic = null;
         }
     }
+
+    // The grey label of a People row (job 483).
+    private static string RoleText(MeetingRole role) => role switch
+    {
+        MeetingRole.Organizer => "Organizer",
+        MeetingRole.Optional => "Optional",
+        _ => "Required",
+    };
 
     // The last segment of a full note name, as NoteInfo.Title.
     private static string NoteTitle(string name)

@@ -8,8 +8,8 @@ namespace Context;
 /// <summary>
 /// Reads the running classic Outlook through its COM interface, late-bound (<c>dynamic</c>, no interop assembly), with
 /// the profile that is already signed in. It only attaches to a running Outlook (<c>GetActiveObject</c>) and never
-/// starts it, never writes to it, and reads only the sensitivity, subject, location, start, end and all-day flag of the
-/// default Calendar's items; a private or confidential item (see <see cref="OutlookSensitivity"/>) is skipped. When the
+/// starts it, never writes to it, and reads only the sensitivity, subject, location, start, end, all-day flag and
+/// (job 483) the organizer and attendee display names of the default Calendar's items; a private or confidential item (see <see cref="OutlookSensitivity"/>) is skipped. When the
 /// Mail digest asks (job 286, opt-in), it also reads the Inbox, read-only: the sensitivity first, then only the subject,
 /// sender name, received time, message class and the first <see cref="MailDigest.MaxBodyLength"/> body characters of
 /// each item. Every COM object it touches is released in a <c>finally</c>. A COM error becomes a kind, never an exception text.
@@ -195,10 +195,22 @@ internal sealed class OutlookComSource : IOutlookSource
             DateTime end = (DateTime)item.End;
             bool allDay = (bool)item.AllDayEvent;
             string? uid = ReadUid(item);
+            // Display names only (job 483), read after the private check; OutlookAttendees drops every entry holding
+            // an address. The recipient collection, whose entries carry addresses, is never read.
+            OutlookPeople people = OutlookAttendees.People(
+                (string?)item.Organizer, (string?)item.RequiredAttendees, (string?)item.OptionalAttendees);
             if (allDay)
             {
                 return new Appointment(
-                    subject, string.IsNullOrEmpty(location) ? null : location, start.Date, end.Date, true, null, uid);
+                    subject,
+                    string.IsNullOrEmpty(location) ? null : location,
+                    start.Date,
+                    end.Date,
+                    true,
+                    people.Attendees,
+                    people.Organizer,
+                    people.OptionalAttendees,
+                    uid);
             }
 
             return new Appointment(
@@ -207,7 +219,9 @@ internal sealed class OutlookComSource : IOutlookSource
                 ToZone(start, zone),
                 ToZone(end, zone),
                 false,
-                null,
+                people.Attendees,
+                people.Organizer,
+                people.OptionalAttendees,
                 uid);
         }
         catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or ArgumentException)

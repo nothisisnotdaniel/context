@@ -66,7 +66,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     `people/<Name>` (`People.PersonNote`, `People.PersonOf`: a direct subpage of the top-level `people`, ignoring case);
     its own mentions never count. `People()` gives each person once with the number of mentioning notes, shown by the
     page's title, else the ordinal-first spelling. `IcsParser` reads each `ATTENDEE`'s `CN` (normalized like a mention)
-    into `Appointment.Attendees`; the address is never read out. `PersonView.Build` lists the mentioning notes and the
+    into `Appointment.Attendees`; the address is never read out. Job 483: also the first valid `ORGANIZER` `CN` into
+    `Appointment.Organizer`, and `ROLE=OPT-PARTICIPANT`/`NON-PARTICIPANT` (trimmed, any case) attendees also into
+    `OptionalAttendees` (a subset of `Attendees` in its order; every other role is required); both are ctor parameters
+    after `attendees` (pass `uid:` by name) and part of `Equals`; occurrences carry the series', an override has its own.
+    `MeetingPeople.For(appointments)` (Core) gives `MeetingPerson(Name, MeetingRole)`: the first non-null organizer, then
+    required, then optional attendees, first-seen order, once per `PersonParser.Key` with the first spelling, the
+    organizer never repeated, required in any appointment = required. `PersonView.Build` lists the mentioning notes and the
     appointments (calendar files and the cached Exchange copy, no download) whose title or location mentions the
     person or whose attendee matches, latest first. **Todos** (job 159): `PersonView.Build(..., todos)` (optional
     `TodoStore?`) adds `OpenTodos` (`List()` order) and `DoneTodos` (job 361: `ListAllDone` order, archived ones included) whose text mentions the person
@@ -397,8 +403,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[d 00:00, d+1 00:00)` plus zero-length events starting on `d`, sorted all-day first, then start, then title
     (ordinal ignoring case), and the names of unreadable files (IO/access error, `FormatException`, too large).
     `IcsParser.Parse(text, zone)` scans linearly (no regexes): unfolds lines starting with space/tab, matches
-    names ignoring case, unescapes `\n \N \, \; \\`, reads `SUMMARY`, `LOCATION`, `DTSTART`, `DTEND`, `STATUS`, `CLASS` of
-    each `VEVENT` (nested components like `VALARM` ignored). Times: `…Z` (UTC), `;TZID=` (unknown id = local),
+    names ignoring case, unescapes `\n \N \, \; \\`, reads `SUMMARY`, `LOCATION`, `DTSTART`, `DTEND`, `STATUS`, `CLASS`, the `ORGANIZER`
+    `CN` and the `ATTENDEE` `CN`/`ROLE` (job 483) of each `VEVENT` (nested components like `VALARM` ignored). Times: `…Z` (UTC), `;TZID=` (unknown id = local),
     floating (local), `;VALUE=DATE` (all-day, `DTEND` exclusive). No `DTEND`: ends at start (all-day: one day).
     Skips `STATUS:CANCELLED`, private events (job 227: `PRIVATE` or `CONFIDENTIAL`, trimmed, ignoring case, on any
     `CLASS` line; always on, no setting, so they never reach the sidebar, `/meeting`, `context current`, review or
@@ -2014,7 +2020,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     second click keeps it, no reload). It lists `DesktopState.AppointmentPage(title, day)` (`MeetingPrep.Related(...,
     max: null)` over the title and the union of the attendees of those appointments; `Sync`, `NoteTags()`, `List()`
     under `indexGate`; any failure gives `IndexUnreadable`, red `Can't read the related notes.`) as `note-button`s
-    (title, full name in `title`, grey `.matches`) through `RequestOpen`; with none (and no appointment on the day,
+    (title, full name in `title`, grey `.matches`) through `RequestOpen`; job 483: above Topics (right after the panel
+    bar), when `AppointmentPageView.People` (`MeetingPeople.For` over those appointments, read before the index, so also
+    set with `IndexUnreadable`) isn't empty, `section.appointment-people` (`h3` `People` labelling its `ul`) has one
+    `li.meeting-person` each: `button.person-link.note-button.cut` (name through `OneLine`, also in `title`) and grey
+    `span.role` `Organizer`/`Required`/`Optional`; a click calls `OnPerson(name)`, which `Main` wires to `OpenMention`; with none (and no appointment on the day,
     grey `No related notes.`). Job 395: `button.create-note-link` `Create a new note` follows the list too, whenever
     related notes are listed or the appointment is on the day (not with `Loading…` or the red line). A click checks
     `DesktopState.MeetingNoteExists(first)` (`MeetingNote.Exists`: today's `Meetings/<part>/yyyy-MM-dd` or the legacy
@@ -2068,15 +2078,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     and no test does (tests use `FakeOutlookSource`: availability, kind and items per call, call counts, `Throws`, a
     `ManualResetEventSlim` gate released on dispose). `OutlookComSource` is late-bound (`dynamic`, no interop package),
     attaches only through `ole32!CLSIDFromProgID` + `oleaut32!GetActiveObject` (never `Activator.CreateInstance`, never
-    starts Outlook), reads only `Sensitivity`, `Subject`, `Location`, `Start`, `End`, `AllDayEvent` of the
-    default Calendar (9; `Sort("[Start]")`, `IncludeRecurrences`, `Restrict` built only from the day in current-culture
+    starts Outlook), reads only `Sensitivity`, `Subject`, `Location`, `Start`, `End`, `AllDayEvent` and (job 483, after the private
+    check) `Organizer`, `RequiredAttendees`, `OptionalAttendees` of the default Calendar (9; `Sort("[Start]")`, `IncludeRecurrences`, `Restrict` built only from the day in current-culture
     `g`), walks `GetFirst`/`GetNext` (never `Count`; 500 items), converts machine time to the
     calendar zone and `FinalReleaseComObject`s every COM object; it writes nothing (no `.Save(`/`.Send(`/`.Delete(`/
-    `.Move(`/`.Display(`) and reads no `HTMLBody`/`Recipients`/`RequiredAttendees`/`SenderEmailAddress` (and `Body` only
+    `.Move(`/`.Display(`) and reads no `HTMLBody`/`Recipients`/`SenderEmailAddress` (and `Body` only
     in the Mail digest's capped read), and has no exemption from any other source scan. Private items (job 227, always on, no setting): `ReadAppointment` reads
     `Sensitivity` first and skips the item, before reading anything else of it, unless `OutlookSensitivity.IsPrivate`
     sees a number equal to 0 (Normal) or 1 (Personal); Private (2), Confidential (3), any other or unreadable value is
-    hidden (fails closed; `OutlookSensitivity.cs`, `OutlookSensitivityTests`). On = `SettingsStore.ReadOutlook()` (exactly `"outlook":{"enabled":true}`;
+    hidden (fails closed; `OutlookSensitivity.cs`, `OutlookSensitivityTests`). Attendees (job 483, `OutlookAttendees.cs`,
+    pure, `OutlookAttendeesTests`): `Names(list)` splits Outlook's `;` display names, trims and `PersonParser.Normalize`s
+    each, dropping empty, invalid and any `@` entry (`null` = none); `Name` filters `Organizer` the same way; `People`
+    gives `Attendees` = required then optional names, `OptionalAttendees` = the optional ones. On = `SettingsStore.ReadOutlook()` (exactly `"outlook":{"enabled":true}`;
     anything else or a broken file is off) and `Available`; off asks the source nothing. `DesktopState` caches each
     day's appointments (one `OutlookCall` with its start time under `outlookGate`; a running call is shared,
     a finished one kept `OutlookCacheAge` = 5 min by the UTC clock), waits at most `OutlookTimeout` (10 s, ctor

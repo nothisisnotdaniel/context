@@ -828,19 +828,22 @@ internal sealed class DesktopState
     /// <summary>
     /// The notes related to the appointments of <paramref name="day"/> whose title is ordinally
     /// <paramref name="title"/> (<see cref="MeetingPrep"/> with no cap, over the title and the union of their
-    /// attendees), off the calling thread. Syncs the index under its lock, then reads
+    /// attendees) and their people by role (<see cref="MeetingPeople.For"/>, read before the index), off the calling
+    /// thread. Syncs the index under its lock, then reads
     /// <see cref="TagIndex.NoteTags"/> and <see cref="NoteStore.List"/>. Reads only and never throws: an unreadable
     /// index (or note list) gives <see cref="AppointmentPageView.IndexUnreadable"/>.
     /// </summary>
     public Task<AppointmentPageView> AppointmentPage(string title, DateOnly day) => Task.Run(() =>
     {
         Appointment? first = null;
+        IReadOnlyList<MeetingPerson> people = [];
         try
         {
             List<Appointment> same = ReadDay(day, OutlookDay(day).Items).Appointments
                 .Where(a => string.Equals(a.Title, title, StringComparison.Ordinal))
                 .ToList();
             first = same.FirstOrDefault();
+            people = MeetingPeople.For(same);
             List<string> attendees = same.SelectMany(a => a.Attendees).Distinct(StringComparer.Ordinal).ToList();
             Appointment merged = first is null
                 ? new Appointment(title, null, day.ToDateTime(TimeOnly.MinValue), day.ToDateTime(TimeOnly.MinValue), false, attendees)
@@ -858,12 +861,12 @@ internal sealed class DesktopState
             }
 
             return new AppointmentPageView(
-                title, day, MeetingPrep.Related(merged, listed, noteTags, null), first, false, topics);
+                title, day, MeetingPrep.Related(merged, listed, noteTags, null), first, false, topics, people);
         }
         catch (Exception)
         {
             // TagIndexException for a bad context.db; any other failure reads the same, with no exception text shown.
-            return new AppointmentPageView(title, day, [], first, true);
+            return new AppointmentPageView(title, day, [], first, true, people: people);
         }
     });
 

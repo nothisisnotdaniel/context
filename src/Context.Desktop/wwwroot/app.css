@@ -2910,6 +2910,23 @@ nav.saved-searches ul {
     min-width: 0;
 }
 
+/* Job 483: the meeting's people by role, each a person link with its grey role. */
+.appointment-page .appointment-people ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.appointment-page .meeting-person {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.appointment-page .meeting-person .role {
+    flex: none;
+}
+
 .create-note-link {
     background: none;
     border: none;

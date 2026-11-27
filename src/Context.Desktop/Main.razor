@@ -51,7 +51,7 @@
                 }
                 @if (page == Page.Appointment && appointmentShown is { } shownAppointment)
                 {
-                    <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnCreated="AppointmentNoteCreated" OnClose="CloseAppointment" />
+                    <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnPerson="OpenMention" OnCreate="CreateAppointmentNote" OnCreated="AppointmentNoteCreated" OnClose="CloseAppointment" />
                 }
                 @if (reviewShown)
                 {

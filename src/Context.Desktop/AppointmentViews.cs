@@ -47,7 +47,7 @@ internal sealed record DayAppointmentsView
 /// <summary>
 /// The appointment page (<see cref="DesktopState.AppointmentPage"/>): every note related to the appointments of one
 /// day with one title (<see cref="MeetingPrep.Related(Appointment, IReadOnlyList{NoteInfo}, IReadOnlyList{ValueTuple{string, string}}, int?)"/>
-/// with no cap), and the first of those appointments (for its meeting note). All text is raw.
+/// with no cap), the first of those appointments (for its meeting note) and their people by role. All text is raw.
 /// </summary>
 internal sealed record AppointmentPageView
 {
@@ -57,9 +57,11 @@ internal sealed record AppointmentPageView
         IReadOnlyList<RelatedNote> related,
         Appointment? first,
         bool indexUnreadable,
-        IReadOnlyList<NoteTopic>? topics = null)
+        IReadOnlyList<NoteTopic>? topics = null,
+        IReadOnlyList<MeetingPerson>? people = null)
     {
         Topics = topics ?? [];
+        People = people ?? [];
         Title = title;
         Day = day;
         Related = related;
@@ -85,6 +87,12 @@ internal sealed record AppointmentPageView
     /// order); empty when there are none or when <see cref="IndexUnreadable"/> is set.
     /// </summary>
     public IReadOnlyList<NoteTopic> Topics { get; }
+
+    /// <summary>
+    /// The organizer, required and optional attendees of these appointments (job 483, <see cref="MeetingPeople.For"/>).
+    /// Read from the calendar before the index, so it is set even when <see cref="IndexUnreadable"/> is.
+    /// </summary>
+    public IReadOnlyList<MeetingPerson> People { get; }
 
     /// <summary>Returns only the type name, so formatting the view never prints note or calendar text.</summary>
     public override string ToString() => nameof(AppointmentPageView);

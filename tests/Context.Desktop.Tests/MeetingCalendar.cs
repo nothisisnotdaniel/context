@@ -35,7 +35,7 @@ internal static class MeetingCalendar
         data.WriteCalendar("meetings.ics", DesktopFixture.Calendar(Sync(), Once(), Plain()));
 
     public static Appointment At(string title, DateTime start, string? uid) =>
-        new(title, null, start, start.AddMinutes(30), false, null, uid);
+        new(title, null, start, start.AddMinutes(30), false, uid: uid);
 
     /// <summary>The link of the Sync occurrence <paramref name="weeks"/> weeks after today's.</summary>
     public static MeetingLink SyncLink(int weeks = 0) => MeetingLink.For(At("Sync", SyncToday.AddDays(7 * weeks), SyncUid))!;

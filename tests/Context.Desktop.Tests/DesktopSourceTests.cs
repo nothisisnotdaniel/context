@@ -2351,11 +2351,10 @@ public sealed class DesktopSourceTests
 
     // 217 AC-8: the Outlook source reads no HTML body and no recipients, and never asks a folder for its Count.
     // 286 AC-11: the plain Body is allowed only as the Mail digest's capped read (OutlookSource_ReadsBodyOnlyCapped).
+    // 483 AC-6: the attendee name lists are allowed (OutlookSource_ReadsPeopleOnlyAfterPrivateCheck); Recipients is not.
     [Theory]
     [InlineData("HTMLBody")]
     [InlineData("Recipients")]
-    [InlineData("RequiredAttendees")]
-    [InlineData("OptionalAttendees")]
     [InlineData("SenderEmailAddress")]
     [InlineData("Attachments")]
     [InlineData(".Count")]
@@ -2442,6 +2441,29 @@ public sealed class DesktopSourceTests
         int subject = read.IndexOf("item.Subject", StringComparison.Ordinal);
         Assert.True(sensitivity >= 0 && check > sensitivity && subject > check);
         Assert.Equal(sensitivity, read.IndexOf("item.", StringComparison.Ordinal));
+    }
+
+    // 483 AC-6: Organizer, RequiredAttendees and OptionalAttendees are read only inside ReadAppointment, after its
+    // private check; nowhere else in the source (comments aside) names them.
+    [Theory]
+    [InlineData("item.Organizer")]
+    [InlineData("item.RequiredAttendees")]
+    [InlineData("item.OptionalAttendees")]
+    public void OutlookSource_ReadsPeopleOnlyAfterPrivateCheck(string read)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile)).ReplaceLineEndings("\n");
+        string method = Between(source, "private static Appointment? ReadAppointment(", "private static string? ReadUid(");
+        string rest = source.Replace(method, string.Empty, StringComparison.Ordinal);
+        string name = read["item.".Length..];
+
+        int check = method.IndexOf("OutlookSensitivity.IsPrivate(", StringComparison.Ordinal);
+        int at = method.IndexOf(read, StringComparison.Ordinal);
+        Assert.True(check >= 0 && at > check);
+        Assert.Single(Regex.Matches(source, @"\bitem\." + name + @"\b"));
+        Assert.DoesNotContain(name, rest, StringComparison.Ordinal);
+        Assert.DoesNotContain("Recipients", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SenderEmailAddress", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("HTMLBody", source, StringComparison.Ordinal);
     }
 
     // The text from start up to (not including) end; both must be found.
