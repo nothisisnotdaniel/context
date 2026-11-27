@@ -451,6 +451,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#527](backlog/527-changelog-note-per-version-shown-on.md) Changelog note per version, shown on first start
 - [?] [#528](backlog/528-cap-the-length-of-the-outlook.md) Cap the length of the Outlook attendee list
 - [?] [#529](backlog/529-find-the-one-off-desktop-test.md) Find the one-off Desktop test failure under parallel runs
+- [?] [#530](backlog/530-check-long-note-names-in-person.md) Check long note names in person-page note todos by eye
+- [?] [#531](backlog/531-test-the-case-only-note-name.md) Test the case-only note-name tie-break of person note todos
+- [?] [#532](backlog/532-test-control-characters-in-note-names.md) Test control characters in note names on the person page
 
 ## Dropped with the terminal UI
 
