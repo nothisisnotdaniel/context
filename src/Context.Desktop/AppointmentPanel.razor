@@ -350,7 +350,7 @@
         }
     }
 
-    // The last segment of a full note name, as NoteInfo.Title.
+    // The grey label of a People row (job 483).
     private static string RoleText(MeetingRole role) => role switch
     {
         MeetingRole.Organizer => "Organizer",
@@ -358,6 +358,7 @@
         _ => "Required",
     };
 
+    // The last segment of a full note name, as NoteInfo.Title.
     private static string NoteTitle(string name)
     {
         int slash = name.LastIndexOf('/');

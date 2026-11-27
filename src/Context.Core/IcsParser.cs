@@ -101,8 +101,8 @@ internal sealed record Appointment
 
 /// <summary>
 /// Reads the part of iCalendar (RFC 5545) that <c>/current</c> and the person pages need: the <c>SUMMARY</c>,
-/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c>, <c>CLASS</c>, <c>ORGANIZER</c> name and <c>ATTENDEE</c> names and roles of each
-/// <c>VEVENT</c>, and
+/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c>, <c>CLASS</c>, <c>ORGANIZER</c> name and
+/// <c>ATTENDEE</c> names and roles of each <c>VEVENT</c>, and
 /// for <see cref="Parse(string, TimeZoneInfo, DateOnly)"/> its recurrence (<c>UID</c>, <c>RRULE</c> through
 /// <see cref="RecurrenceRule"/>, <c>RDATE</c>, <c>EXDATE</c>, <c>RECURRENCE-ID</c>). Everything else, including
 /// nested components such as <c>VALARM</c> and <c>VTIMEZONE</c>, is ignored. The input is untrusted: it is scanned
