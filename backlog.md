@@ -189,7 +189,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#516](backlog/516-suppress-the-browser-menu-on-non.md) Suppress the browser menu on non-editable chips inside the note editor
 - [ ] [#517](backlog/517-serve-the-bundled-mermaid-renderer-script.md) Serve the bundled Mermaid renderer script to the Windows desktop frame
 - [ ] [#518](backlog/518-restore-and-raise-the-existing-windows.md) Restore and raise the existing Windows window on repeated desktop starts
-- [stop] Auto stops here
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
