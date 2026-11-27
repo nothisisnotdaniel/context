@@ -1,6 +1,7 @@
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
 
@@ -27,7 +28,7 @@ public sealed class ConfirmDialogTests : IDisposable
         Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
         JSRuntimeInvocation focus = context.JSInterop.VerifyFocusAsyncInvoke();
         ElementReference target = Assert.IsType<ElementReference>(focus.Arguments[0]);
-        Assert.Equal(cut.Find("button.cancel").GetAttribute("blazor:elementReference"), target.Id);
+        Assert.Equal(ElementRefs.Id<ConfirmDialog, ConfirmDialog>(cut, "cancelButton"), target.Id);
     }
 
     // AC-6: confirm hands a confirmation to the parent; Cancel and Esc only cancel.
@@ -36,13 +37,13 @@ public sealed class ConfirmDialogTests : IDisposable
     {
         IRenderedComponent<ConfirmDialog> cut = Render("Sure?");
 
-        cut.Find("button.cancel").Click();
-        cut.Find("[role=dialog]").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
-        cut.Find("[role=dialog]").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" });
+        StaleClick.Fire(() => cut.Find("button.cancel"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find("[role=dialog]"), e => e.KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" }));
+        StaleClick.Fire(() => cut.Find("[role=dialog]"), e => e.KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" }));
         Assert.Equal(2, cancelled);
         Assert.Empty(confirmed);
 
-        cut.Find("button.confirm").Click();
+        StaleClick.Fire(() => cut.Find("button.confirm"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Single(confirmed);
         Assert.Equal(2, cancelled);
     }
@@ -54,7 +55,7 @@ public sealed class ConfirmDialogTests : IDisposable
         IRenderedComponent<ConfirmDialog> cut = Render("Sure?", busy: true);
 
         Assert.All(cut.FindAll("button"), b => Assert.True(b.HasAttribute("disabled")));
-        cut.Find("[role=dialog]").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
+        StaleClick.Fire(() => cut.Find("[role=dialog]"), e => e.KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" }));
         Assert.Equal(0, cancelled);
         Assert.Empty(confirmed);
     }

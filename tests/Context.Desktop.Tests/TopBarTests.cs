@@ -43,7 +43,7 @@ public sealed class TopBarTests : IDisposable
 
     private static IRenderedComponent<TopBar> OpenCalendar(IRenderedComponent<TopBar> cut)
     {
-        cut.Find("button.day-pick-open").Click();
+        StaleClick.Fire(() => cut.Find("button.day-pick-open"), e => e.ClickAsync(new MouseEventArgs()));
         return cut;
     }
 
@@ -60,23 +60,32 @@ public sealed class TopBarTests : IDisposable
         cut.Find($".day-pick button.day[aria-label='{day.ToString("dddd, d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)}']");
 
     private static void DayKey(IRenderedComponent<TopBar> cut, string key) =>
-        FocusDay(cut).KeyDown(new KeyboardEventArgs { Key = key });
+        StaleClick.Fire(() => FocusDay(cut), e => e.KeyDownAsync(new KeyboardEventArgs { Key = key }));
 
     private static void MenuKey(IRenderedComponent<TopBar> cut, string key) =>
-        cut.Find(".page-menu").KeyDown(new KeyboardEventArgs { Key = key });
+        StaleClick.Fire(() => cut.Find(".page-menu"), e => e.KeyDownAsync(new KeyboardEventArgs { Key = key }));
 
-    private static string? Ref(IRenderedComponent<TopBar> cut, string selector)
+    // The id of the TopBar element reference at the path (job 491: read from the field, not from the markup, which a
+    // later render leaves without it).
+    private static string Ref(IRenderedComponent<TopBar> cut, string path) => ElementRefs.Id<TopBar, TopBar>(cut, path);
+
+    // The id of the calendar's focus day button (tabindex 0): its index in the grid names its DayPicker field item.
+    private static string FocusDayRef(IRenderedComponent<TopBar> cut)
     {
-        string? id = cut.Find(selector).GetAttribute("blazor:elementReference");
-        Assert.False(string.IsNullOrEmpty(id));
-        return id;
+        int index = cut.FindAll(".day-pick button.day").ToList().FindIndex(b => b.GetAttribute("tabindex") == "0");
+        Assert.True(index >= 0, "no focus day in the calendar");
+        return ElementRefs.Id<DayPicker, TopBar>(cut, $"dayButtons[{index}]");
     }
 
     private string? LastFocusId()
     {
-        IReadOnlyList<JSRuntimeInvocation> calls = context.JSInterop.Invocations
-            .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
-            .ToList();
+        // Read on the renderer's dispatcher, where the calls are recorded (job 491).
+        IReadOnlyList<JSRuntimeInvocation> calls = BoundedWait.Result(
+            context.Renderer.Dispatcher.InvokeAsync(() => context.JSInterop.Invocations
+                .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
+                .ToList()),
+            BoundedWait.Dispatcher,
+            "TopBarTests.LastFocusId on the renderer's dispatcher");
         if (calls.Count == 0)
         {
             return null;
@@ -104,7 +113,7 @@ public sealed class TopBarTests : IDisposable
         Assert.False(open.HasAttribute("disabled"));
         Assert.Empty(cut.FindAll(".page-menu"));
 
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal("true", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
         IElement menu = cut.Find("div.page-menu[role=menu]");
@@ -117,7 +126,7 @@ public sealed class TopBarTests : IDisposable
         Assert.All(items, b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.All(items, b => Assert.Equal("-1", b.GetAttribute("tabindex")));
 
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Empty(cut.FindAll(".page-menu"));
         Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
@@ -157,7 +166,7 @@ public sealed class TopBarTests : IDisposable
         Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
 
         IRenderedComponent<TopBar> other = Render(Actions());
-        other.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => other.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Single(other.FindAll(".page-menu"));
         other.Render(p => p.Add(c => c.PageActionsDisabled, true));
 
@@ -173,14 +182,14 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         cut.Render(p => p.Add(c => c.PageActions, []));
         Assert.Empty(cut.FindAll("button.page-menu-open"));
         cut.Render(p => p.Add(c => c.PageActions, Actions()));
         Assert.Empty(cut.FindAll(".page-menu"));
         Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
 
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         cut.Render(p => p.Add(c => c.PageActionsDisabled, true));
         cut.Render(p => p.Add(c => c.PageActionsDisabled, false));
         Assert.Empty(cut.FindAll(".page-menu"));
@@ -193,11 +202,10 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.page-menu-open").Click();
-        // bUnit writes an element's reference id only into the render that created it, so read all three now.
-        string? first = Ref(cut, ".page-menu button.rename");
-        string? second = Ref(cut, ".page-menu button.history");
-        string? last = Ref(cut, ".page-menu button.delete");
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
+        string? first = Ref(cut, "items[0]");
+        string? second = Ref(cut, "items[1]");
+        string? last = Ref(cut, "items[^1]");
         Assert.Equal(first, LastFocusId());
 
         MenuKey(cut, "ArrowDown");
@@ -223,9 +231,9 @@ public sealed class TopBarTests : IDisposable
     public void Keys_Escape_ClosesAndFocusesMenuButton()
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
-        string? button = Ref(cut, "button.page-menu-open");
+        string? button = Ref(cut, "menuButton");
 
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         MenuKey(cut, "ArrowDown");
         MenuKey(cut, "Escape");
 
@@ -240,8 +248,8 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.page-menu-open").Click();
-        cut.Find(".page-menu button.history").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find(".page-menu button.history"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["history"], chosen);
         Assert.Empty(cut.FindAll(".page-menu"));
@@ -253,8 +261,8 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.page-menu-open").Click();
-        cut.Find(".page-menu-backdrop").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find(".page-menu-backdrop"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Empty(cut.FindAll(".page-menu"));
         Assert.Empty(cut.FindAll(".page-menu-backdrop"));
@@ -292,13 +300,13 @@ public sealed class TopBarTests : IDisposable
             Assert.False(button.HasAttribute("disabled"));
         }
 
-        cut.Find(".day-pick button.day-pick-next").Click();
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-next"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal("December 2026", GridLabel(cut));
-        cut.Find(".day-pick button.day-pick-next").Click();
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-next"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal("January 2027", GridLabel(cut));
-        cut.Find(".day-pick button.day-pick-prev").Click();
-        cut.Find(".day-pick button.day-pick-prev").Click();
-        cut.Find(".day-pick button.day-pick-prev").Click();
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-prev"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-prev"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-prev"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal("October 2026", cut.Find(".day-pick .day-pick-month").TextContent);
         Assert.Single(cut.FindAll(".day-pick button.day[tabindex='0']"));
         Assert.Empty(picked);
@@ -353,8 +361,8 @@ public sealed class TopBarTests : IDisposable
             Assert.Equal($"Week {first.TextContent}", first.GetAttribute("aria-label"));
         }
 
-        cut.Find(".day-pick button.day-pick-next").Click();
-        cut.Find(".day-pick button.day-pick-next").Click();
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-next"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-next"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal("January 2027", GridLabel(cut));
         Assert.Equal("Monday, 28 December 2026", cut.FindAll(".day-pick button.day")[0].GetAttribute("aria-label"));
         Assert.Equal("53", cut.FindAll(".day-pick th[role=rowheader]")[0].TextContent);
@@ -377,7 +385,7 @@ public sealed class TopBarTests : IDisposable
         Assert.Contains("outside", Day(cut, new DateOnly(2026, 12, 6)).ClassList);
         Assert.Empty(cut.FindAll(".day-pick button.day[disabled]"));
 
-        october.Click();
+        StaleClick.Fire(() => Day(cut, new DateOnly(2026, 10, 26)), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal([new DateOnly(2026, 10, 26)], picked);
 
         IRenderedComponent<TopBar> late = OpenCalendar(RenderCalendar(new DateOnly(2026, 11, 18), new DateOnly(2100, 12, 31)));
@@ -433,7 +441,7 @@ public sealed class TopBarTests : IDisposable
         IElement focus = FocusDay(cut);
         Assert.Equal("Tuesday, 9 March 2027", focus.GetAttribute("aria-label"));
         Assert.Equal(41, cut.FindAll(".day-pick button.day[tabindex='-1']").Count);
-        Assert.Equal(Ref(cut, ".day-pick button.day[tabindex='0']"), LastFocusId());
+        Assert.Equal(FocusDayRef(cut), LastFocusId());
     }
 
     // 213 AC-7: without Selected it opens on today; every opening starts again from that month.
@@ -442,14 +450,14 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = OpenCalendar(RenderCalendar(new DateOnly(2026, 11, 18), null));
         Assert.Equal("Wednesday, 18 November 2026", FocusDay(cut).GetAttribute("aria-label"));
-        Assert.Equal(Ref(cut, ".day-pick button.day[tabindex='0']"), LastFocusId());
+        Assert.Equal(FocusDayRef(cut), LastFocusId());
 
-        cut.Find(".day-pick button.day-pick-next").Click();
+        StaleClick.Fire(() => cut.Find(".day-pick button.day-pick-next"), e => e.ClickAsync(new MouseEventArgs()));
         DayKey(cut, "PageDown");
         Assert.Equal("January 2027", GridLabel(cut));
-        cut.Find("button.day-pick-open").Click();
+        StaleClick.Fire(() => cut.Find("button.day-pick-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Empty(cut.FindAll(".day-pick"));
-        cut.Find("button.day-pick-open").Click();
+        StaleClick.Fire(() => cut.Find("button.day-pick-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal("November 2026", GridLabel(cut));
         Assert.Equal("Wednesday, 18 November 2026", FocusDay(cut).GetAttribute("aria-label"));
@@ -462,7 +470,7 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = OpenCalendar(RenderCalendar(new DateOnly(2026, 11, 18), null));
 
-        Day(cut, new DateOnly(2026, 11, 20)).Click();
+        StaleClick.Fire(() => Day(cut, new DateOnly(2026, 11, 20)), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal([new DateOnly(2026, 11, 20)], picked);
         Assert.Empty(cut.FindAll(".day-pick"));
@@ -532,7 +540,7 @@ public sealed class TopBarTests : IDisposable
         DayKey(cut, "ArrowRight");
         IElement focus = FocusDay(cut);
 
-        focus.KeyDown(new KeyboardEventArgs { Key = "Enter" });
+        StaleClick.Fire(() => FocusDay(cut), e => e.KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
         Assert.Empty(cut.FindAll(".day-pick"));
         // The day buttons are gone with the closed calendar, so the follow-up click reaches no handler (in the browser
         // a click already queued before that render finds the calendar closed and picks nothing).
@@ -548,7 +556,7 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = OpenCalendar(RenderCalendar(new DateOnly(2026, 11, 18), null));
 
-        cut.Find(".top-bar").KeyDown(new KeyboardEventArgs { Key = "Escape" });
+        StaleClick.Fire(() => cut.Find(".top-bar"), e => e.KeyDownAsync(new KeyboardEventArgs { Key = "Escape" }));
 
         Assert.Empty(cut.FindAll(".day-pick"));
         Assert.Empty(picked);
@@ -605,40 +613,40 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.capture-open").Click();
+        StaleClick.Fire(() => cut.Find("button.capture-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["capture"], Open(cut));
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["menu"], Open(cut));
-        cut.Find("button.day-pick-open").Click();
+        StaleClick.Fire(() => cut.Find("button.day-pick-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["day"], Open(cut));
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["menu"], Open(cut));
-        cut.Find("button.capture-open").Click();
+        StaleClick.Fire(() => cut.Find("button.capture-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["capture"], Open(cut));
         Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
         // 213 AC-10: the calendar and Capture close each other too.
-        cut.Find("button.day-pick-open").Click();
+        StaleClick.Fire(() => cut.Find("button.day-pick-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["day"], Open(cut));
         Assert.Equal("false", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
-        cut.Find("button.capture-open").Click();
+        StaleClick.Fire(() => cut.Find("button.capture-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["capture"], Open(cut));
         Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
         // 218 AC-7: Search closes the other three, and each of them closes Search.
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["search"], Open(cut));
         Assert.Equal("false", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
-        cut.Find("button.capture-open").Click();
+        StaleClick.Fire(() => cut.Find("button.capture-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["capture"], Open(cut));
         Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
-        cut.Find("button.search-open").Click();
-        cut.Find("button.day-pick-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find("button.day-pick-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["day"], Open(cut));
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["search"], Open(cut));
         Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
-        cut.Find("button.page-menu-open").Click();
+        StaleClick.Fire(() => cut.Find("button.page-menu-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["menu"], Open(cut));
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
         Assert.Equal(["search"], Open(cut));
         Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
         Assert.Empty(chosen);
@@ -648,7 +656,7 @@ public sealed class TopBarTests : IDisposable
     private static IElement SearchField(IRenderedComponent<TopBar> cut) => Assert.Single(cut.FindAll(".search-pop input"));
 
     private static void SearchKey(IRenderedComponent<TopBar> cut, string key) =>
-        SearchField(cut).KeyDown(new KeyboardEventArgs { Key = key });
+        StaleClick.Fire(() => SearchField(cut), e => e.KeyDownAsync(new KeyboardEventArgs { Key = key }));
 
     // 218 AC-1: Search sits after Capture: typed, named, closed, icon only, one safe decorative svg.
     [Fact]
@@ -681,7 +689,7 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Single(cut.FindAll(".search-pop-backdrop"));
         Assert.Single(cut.FindAll(".search-pop"));
@@ -692,9 +700,9 @@ public sealed class TopBarTests : IDisposable
         Assert.Equal("200", input.GetAttribute("maxlength"));
         Assert.Equal(string.Empty, input.GetAttribute("value") ?? string.Empty);
         Assert.Equal("true", cut.Find("button.search-open").GetAttribute("aria-expanded"));
-        Assert.Equal(Ref(cut, ".search-pop input"), LastFocusId());
+        Assert.Equal(Ref(cut, "searchField"), LastFocusId());
 
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Empty(cut.FindAll(".search-pop"));
         Assert.Empty(cut.FindAll(".search-pop-backdrop"));
@@ -708,8 +716,8 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.search-open").Click();
-        SearchField(cut).Input("budget");
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => SearchField(cut), e => e.InputAsync(new ChangeEventArgs { Value = "budget" }));
         SearchKey(cut, "a");
         SearchKey(cut, "ArrowDown");
         Assert.Empty(searched);
@@ -720,7 +728,7 @@ public sealed class TopBarTests : IDisposable
         Assert.Empty(cut.FindAll(".search-pop"));
         Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
 
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(string.Empty, SearchField(cut).GetAttribute("value") ?? string.Empty);
         Assert.Equal(["budget"], searched);
@@ -732,7 +740,7 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
         SearchKey(cut, "Enter");
 
         Assert.Equal([string.Empty], searched);
@@ -745,10 +753,10 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.search-open").Click();
-        SearchField(cut).Input("left over");
-        cut.Find("button.search-open").Click();
-        cut.Find("button.search-open").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => SearchField(cut), e => e.InputAsync(new ChangeEventArgs { Value = "left over" }));
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(string.Empty, SearchField(cut).GetAttribute("value") ?? string.Empty);
         Assert.Empty(searched);
@@ -759,10 +767,10 @@ public sealed class TopBarTests : IDisposable
     public void Search_Escape_ClosesAndFocusesSearchButton()
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
-        string? button = Ref(cut, "button.search-open");
+        string? button = Ref(cut, "searchButton");
 
-        cut.Find("button.search-open").Click();
-        SearchField(cut).Input("budget");
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => SearchField(cut), e => e.InputAsync(new ChangeEventArgs { Value = "budget" }));
         SearchKey(cut, "Escape");
 
         Assert.Empty(cut.FindAll(".search-pop"));
@@ -777,8 +785,8 @@ public sealed class TopBarTests : IDisposable
     {
         IRenderedComponent<TopBar> cut = Render(Actions());
 
-        cut.Find("button.search-open").Click();
-        cut.Find(".search-pop-backdrop").Click();
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+        StaleClick.Fire(() => cut.Find(".search-pop-backdrop"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Empty(cut.FindAll(".search-pop"));
         Assert.Empty(cut.FindAll(".search-pop-backdrop"));

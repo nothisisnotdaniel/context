@@ -312,7 +312,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         cut.WaitForAssertion(
             () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.False(File.Exists(PathOf(Review)));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").GetAttribute("title")), Wait);
         Assert.True(File.Exists(PathOf(Review)));
         Assert.Equal("Created " + Review, cut.Find(".main-status").TextContent);
@@ -357,7 +357,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, "/meeting 2");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
 
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.False(File.Exists(PathOf(Review)));
@@ -431,9 +431,9 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     // Opens a note by its full name through /open: the editor is mounted and ready and shows that name.
@@ -530,7 +530,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.Equal("Book", cut.Find(".dialog button.confirm").TextContent);
         Assert.Empty(data.TimesRunner.Calls);
 
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".dialog button.confirm");
 
         cut.WaitForAssertion(
             () => Assert.Equal("Booked 11:00 Review: Q4/plan in Times.", cut.Find(".main-status").TextContent), Wait);
@@ -551,11 +551,11 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         if (escape)
         {
-            await cut.Find(".dialog").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, ".dialog", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find(".dialog button.cancel").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".dialog button.cancel");
         }
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".dialog")), Wait);
@@ -580,7 +580,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         IRenderedComponent<Main> cut = await MeetingAsync("/meeting 2", Review);
         WaitForBookQuestion(cut);
 
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".dialog button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(text, cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));

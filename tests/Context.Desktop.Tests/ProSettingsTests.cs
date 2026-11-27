@@ -129,7 +129,7 @@ public sealed class ProSettingsTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         await TypeKey(cut, " " + token + " ");
-        await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.pro-activate");
 
         Bar.WaitForAssertion(() => Assert.Equal(
             "Suite Pro activated for Ada Lovelace · updates until 2027-12-31.", data.StatusBar.Text), Wait);
@@ -143,7 +143,7 @@ public sealed class ProSettingsTests : IDisposable
         Assert.DoesNotContain(token[LicenceKey.Prefix.Length..][..12], cut.Markup, StringComparison.Ordinal);
 
         // The typed key went with the save: Activate again finds the field empty.
-        await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.pro-activate");
         Bar.WaitForAssertion(() => Assert.Equal("Paste your licence key first.", data.StatusBar.Text), Wait);
         Assert.Single(data.LicenceStore.Writes);
     }
@@ -155,7 +155,7 @@ public sealed class ProSettingsTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         await TypeKey(cut, data.Licences.Token());
-        await cut.Find("input.pro-key").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, "input.pro-key", new KeyboardEventArgs { Key = "Enter" });
 
         Bar.WaitForAssertion(() => Assert.StartsWith("Suite Pro activated for", data.StatusBar.Text, StringComparison.Ordinal), Wait);
     }
@@ -168,7 +168,7 @@ public sealed class ProSettingsTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         await TypeKey(cut, key);
-        await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.pro-activate");
 
         Bar.WaitForAssertion(() => Assert.Equal(text, data.StatusBar.Text), Wait);
         Assert.Equal("red", data.StatusBar.Css);
@@ -192,7 +192,7 @@ public sealed class ProSettingsTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         await TypeKey(cut, data.Licences.Token(name: "Grace Hopper"));
-        Task click = cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
+        Task click = StaleClick.ClickAsync(cut, "button.pro-activate");
         Assert.True(await entered.WaitAsync(Wait));
 
         cut.WaitForAssertion(() =>
@@ -216,13 +216,13 @@ public sealed class ProSettingsTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         await TypeKey(cut, data.Licences.Token());
-        await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.pro-activate");
         Bar.WaitForAssertion(() => Assert.Equal("Can't save the licence. Nothing was stored.", data.StatusBar.Text), Wait);
 
         data.LicenceStore.WriteThrows = false;
         File.WriteAllText(data.ActivationFolder, "not a folder");
         await TypeKey(cut, data.Licences.Token());
-        await cut.Find("button.pro-activate").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.pro-activate");
         Bar.WaitForAssertion(() => Assert.Equal("Can't write the activation file. Nothing was stored.", data.StatusBar.Text), Wait);
         Assert.Equal("red", data.StatusBar.Css);
         Assert.Null(data.LicenceStore.Stored);
@@ -239,11 +239,11 @@ public sealed class ProSettingsTests : IDisposable
 
         IElement remove = cut.Find("button.pro-remove");
         Assert.Equal("Remove licence", remove.TextContent);
-        await remove.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find("button.pro-remove"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal("Remove the Suite Pro licence from this computer? Times uses it too.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Remove", cut.Find("[role=dialog] button.confirm").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(0, data.LicenceStore.Deletes);
@@ -259,8 +259,8 @@ public sealed class ProSettingsTests : IDisposable
         await Activated(data.Licences.Token());
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("button.pro-remove").ClickAsync(new MouseEventArgs());
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.pro-remove");
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() => Assert.Equal("Suite Pro licence removed from this computer.", data.StatusBar.Text), Wait);
         Assert.Equal("accent", data.StatusBar.Css);
@@ -300,7 +300,7 @@ public sealed class ProSettingsTests : IDisposable
         Assert.Equal("button", button.GetAttribute("type"));
         Assert.Equal(0, opened);
 
-        button.Click();
+        StaleClick.Fire(() => cut.Find("button.pro-open-settings"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(1, opened);
     }
@@ -323,9 +323,9 @@ public sealed class ProSettingsTests : IDisposable
         Assert.Contains(CurrentHeadingRef(cut), FocusIds(cut));
 
         // Opening Settings the usual way moves no focus to the heading.
-        await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".settings-panel button.close");
         int focusCalls = FocusIds(cut).Count;
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Equal("No Pro licence activated.", cut.Find(".settings-panel p.pro-state").TextContent), Wait);
         Assert.Equal(focusCalls, FocusIds(cut).Count);
 
@@ -348,17 +348,23 @@ public sealed class ProSettingsTests : IDisposable
     // The element ids of every domWrapper.focus call, read on the renderer's dispatcher so the list is not
     // read while the renderer adds to it.
     private List<string> FocusIds(IRenderedComponent<Main> cut) =>
-        cut.InvokeAsync(() => data.Bunit.JSInterop.Invocations
-            .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
-            .Select(i => ((ElementReference)i.Arguments[0]!).Id)
-            .ToList()).GetAwaiter().GetResult();
+        BoundedWait.Result(
+            cut.InvokeAsync(() => data.Bunit.JSInterop.Invocations
+                .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
+                .Select(i => ((ElementReference)i.Arguments[0]!).Id)
+                .ToList()),
+            BoundedWait.Dispatcher,
+            "ProSettingsTests.FocusIds on the renderer's dispatcher");
 
     // The proHeading reference of the SettingsPanel shown now.
     private static string CurrentHeadingRef(IRenderedComponent<Main> cut)
     {
-        string id = cut.InvokeAsync(() => ((ElementReference)typeof(SettingsPanel)
-            .GetField("proHeading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .GetValue(cut.FindComponent<SettingsPanel>().Instance)!).Id).GetAwaiter().GetResult();
+        string id = BoundedWait.Result(
+            cut.InvokeAsync(() => ((ElementReference)typeof(SettingsPanel)
+                .GetField("proHeading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .GetValue(cut.FindComponent<SettingsPanel>().Instance)!).Id),
+            BoundedWait.Dispatcher,
+            "ProSettingsTests.CurrentHeadingRef on the renderer's dispatcher");
         Assert.False(string.IsNullOrEmpty(id));
         return id;
     }
@@ -410,5 +416,5 @@ public sealed class ProSettingsTests : IDisposable
     }
 
     private static Task TypeKey(IRenderedComponent<SettingsPanel> cut, string value) =>
-        cut.Find("input.pro-key").InputAsync(new ChangeEventArgs { Value = value });
+        StaleClick.InputAsync(cut, "input.pro-key", new ChangeEventArgs { Value = value });
 }

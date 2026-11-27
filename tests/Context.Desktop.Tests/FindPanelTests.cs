@@ -41,8 +41,8 @@ public sealed class FindPanelTests : IDisposable
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Empty(cut.FindAll("p[role=status]"));
 
-        await cut.FindAll(".find-notes button")[1].ClickAsync(new MouseEventArgs());
-        await cut.Find("button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".find-notes button")[1], e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, "button.close");
 
         Assert.Equal(["people/Anna"], opened);
         Assert.Equal(1, closed);

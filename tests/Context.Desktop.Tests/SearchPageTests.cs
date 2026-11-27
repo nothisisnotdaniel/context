@@ -57,7 +57,7 @@ public sealed class SearchPageTests : IDisposable
         await RunPalette(cut, "/search budget");
         WaitForHits(cut, 2);
         Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
-        await cut.Find(".search-panel .search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".search-panel .search-input", new KeyboardEventArgs { Key = "Escape" });
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel")), Wait);
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
 
@@ -147,8 +147,8 @@ public sealed class SearchPageTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await TopBarSearch(cut, "nothing");
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "budget" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "budget" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
         WaitForHits(cut, 2);
         Assert.Equal(["Anna", "Plan"], HitNames(cut));
         Assert.Empty(cut.FindAll("button.search-back"));
@@ -219,7 +219,7 @@ public sealed class SearchPageTests : IDisposable
 
         await Click(cut, () => cut.FindAll(".search-hits .note-button")[0]);
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Other?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Single(cut.FindAll(".search-panel"));
         Assert.Empty(cut.FindAll("button.search-back"));
@@ -227,7 +227,7 @@ public sealed class SearchPageTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await Click(cut, () => cut.FindAll(".search-hits .note-button")[0]);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         WaitForNote(cut, js, mounts, "Anna");
         Assert.Single(cut.FindAll("button.search-back"));
@@ -351,23 +351,23 @@ public sealed class SearchPageTests : IDisposable
         Assert.False(string.IsNullOrEmpty(id));
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
                 i => i.Arguments[0] is ElementReference r && r.Id == id),
             Wait);
     }
 
     private static async Task TopBarSearch(IRenderedComponent<Main> cut, string text)
     {
-        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".top-bar button.search-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop input")), Wait);
-        await cut.Find(".search-pop input").InputAsync(new ChangeEventArgs { Value = text });
-        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-pop input", new ChangeEventArgs { Value = text });
+        await StaleClick.KeyDownAsync(cut, ".search-pop input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 }

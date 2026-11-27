@@ -124,7 +124,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         string panel = side == "left" ? "NotesPanel" : "TodoPanel";
         int panelsBefore = side == "left" ? cut.FindComponents<NotesPanel>().Count : cut.FindComponents<TodoPanel>().Count;
 
-        await cut.Find($".{side}-toggle").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, $".{side}-toggle");
 
         cut.WaitForAssertion(() => Assert.True(cut.Find(".layout").ClassList.Contains($"{side}-collapsed")), Wait);
         IElement toggle = cut.Find($".{side}-toggle");
@@ -138,7 +138,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         Assert.True(Saved().Collapsed(side == "left" ? SidebarSide.Left : SidebarSide.Right));
         Assert.Equal(1, saves);
 
-        await cut.Find($".{side}-toggle").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, $".{side}-toggle");
 
         cut.WaitForAssertion(() => Assert.False(cut.Find(".layout").ClassList.Contains($"{side}-collapsed")), Wait);
         Assert.False(cut.Find($"{region} .sidebar-panels").HasAttribute("hidden"));
@@ -247,7 +247,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
     {
         IRenderedComponent<Main> cut = await RenderSettledAsync();
 
-        await cut.Find($".{side}-resizer").KeyDownAsync(new KeyboardEventArgs { Key = key });
+        await StaleClick.KeyDownAsync(cut, $".{side}-resizer", new KeyboardEventArgs { Key = key });
 
         cut.WaitForAssertion(() => Assert.Equal(1, saves), Wait);
         Assert.Equal(new SidebarLayout(left, false, right, false), Saved());
@@ -257,7 +257,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         // The same key again at a bound (Home/End) changes nothing and saves nothing.
         if (key is "Home" or "End")
         {
-            await cut.Find($".{side}-resizer").KeyDownAsync(new KeyboardEventArgs { Key = key });
+            await StaleClick.KeyDownAsync(cut, $".{side}-resizer", new KeyboardEventArgs { Key = key });
             await cut.InvokeAsync(() => { });
             Assert.Equal(1, saves);
             Assert.Equal(2, data.Sidebars().Count);
@@ -271,10 +271,10 @@ public sealed class SidebarLayoutUiTests : IDisposable
     public async Task Enter_Collapses_FocusesToggle(string side)
     {
         IRenderedComponent<Main> cut = await RenderSettledAsync();
-        await cut.Find($".{side}-resizer").KeyDownAsync(new KeyboardEventArgs { Key = "a" });
+        await StaleClick.KeyDownAsync(cut, $".{side}-resizer", new KeyboardEventArgs { Key = "a" });
         Assert.Equal(0, saves);
 
-        await cut.Find($".{side}-resizer").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, $".{side}-resizer", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.True(cut.Find(".layout").ClassList.Contains($"{side}-collapsed")), Wait);
         Assert.Equal(1, saves);
@@ -284,7 +284,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         ElementReference toggle = (ElementReference)typeof(Main)
             .GetField(side + "Toggle", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
-        JSRuntimeInvocation focus = data.Bunit.JSInterop.Invocations.Last(i => i.Identifier.EndsWith(".focus", StringComparison.Ordinal));
+        JSRuntimeInvocation focus = data.JsCalls().Last(i => i.Identifier.EndsWith(".focus", StringComparison.Ordinal));
         Assert.Equal(toggle.Id, ((ElementReference)focus.Arguments[0]!).Id);
     }
 
@@ -301,7 +301,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         byte[] before = File.ReadAllBytes(SettingsPath);
         IRenderedComponent<Main> cut = await RenderSettledAsync();
 
-        await cut.Find(".left-toggle").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".left-toggle");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't save the sidebar layout.", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -309,7 +309,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(SettingsPath));
 
         File.WriteAllText(SettingsPath, "{}");
-        await cut.Find(".left-toggle").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".left-toggle");
 
         cut.WaitForAssertion(() => Assert.Equal(string.Empty, cut.Find(".main-status").TextContent), Wait);
         Assert.False(cut.Find(".layout").ClassList.Contains("left-collapsed"));
@@ -322,7 +322,7 @@ public sealed class SidebarLayoutUiTests : IDisposable
     {
         IRenderedComponent<Main> cut = await RenderSettledAsync();
 
-        await cut.Find(".right-toggle").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".right-toggle");
 
         cut.WaitForAssertion(() => Assert.Equal(1, saves), Wait);
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);

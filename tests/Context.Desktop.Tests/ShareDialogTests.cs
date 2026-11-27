@@ -83,7 +83,7 @@ public sealed class ShareDialogTests : IDisposable
         Assert.Equal(["Choose file…", "Cancel"], cut.FindAll(".dialog button").Select(b => b.TextContent).ToArray());
         Assert.All(cut.FindAll(".dialog button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".dialog button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal($"Shared Plan as HTML: {target}", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
@@ -108,9 +108,9 @@ public sealed class ShareDialogTests : IDisposable
         await MainTests.ChooseAsync(cut, "share");
         cut.WaitForElement(".dialog input[type=checkbox]", Wait);
 
-        await cut.Find(".dialog input[type=checkbox]").ChangeAsync(new ChangeEventArgs { Value = false });
+        await StaleClick.ChangeAsync(cut, ".dialog input[type=checkbox]", new ChangeEventArgs { Value = false });
         Assert.False(cut.Find(".dialog input[type=checkbox]").HasAttribute("checked"));
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".dialog button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal($"Shared Plan as HTML: {target}", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("<p>secret #private</p>", File.ReadAllText(target), StringComparison.Ordinal);
@@ -132,11 +132,11 @@ public sealed class ShareDialogTests : IDisposable
 
         if (escape)
         {
-            await cut.Find(".dialog").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, ".dialog", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find(".dialog button.cancel").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".dialog button.cancel");
         }
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".dialog")), Wait);
@@ -157,7 +157,7 @@ public sealed class ShareDialogTests : IDisposable
         await MainTests.ChooseAsync(cut, "share");
         cut.WaitForElement(".dialog button.confirm", Wait);
 
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".dialog button.confirm");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".dialog")), Wait);
         Assert.Equal(1, data.Dialog.ShareSaves);
@@ -179,7 +179,7 @@ public sealed class ShareDialogTests : IDisposable
         await MainTests.ChooseAsync(cut, "share");
         cut.WaitForElement(".dialog button.confirm", Wait);
 
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".dialog button.confirm");
 
         cut.WaitForAssertion(
             () => Assert.Equal("That file already exists; choose a new name: " + target, cut.Find(".main-status").TextContent), Wait);
@@ -203,7 +203,7 @@ public sealed class ShareDialogTests : IDisposable
 
         await MainTests.OpenMenuAsync(cut);
         Assert.Empty(cut.FindAll(".page-menu button.share"));
-        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu-backdrop");
 
         await RunPalette(cut, "/share");
 
@@ -231,9 +231,9 @@ public sealed class ShareDialogTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)

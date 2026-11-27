@@ -96,7 +96,7 @@ public sealed class SettingsPanelTests : IDisposable
 
         await Type(cut, string.Empty);
 
-        await cut.Find("input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, "input", new KeyboardEventArgs { Key = "Enter" });
         Assert.False(Directory.Exists(data.Root));
     }
 
@@ -114,7 +114,7 @@ public sealed class SettingsPanelTests : IDisposable
         };
         await Type(cut, FakeHttpHandler.Link);
 
-        Task click = cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        Task click = StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
         Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
 
         cut.WaitForAssertion(() => Assert.True(cut.Find("input").HasAttribute("disabled")), Wait);
@@ -179,11 +179,11 @@ public sealed class SettingsPanelTests : IDisposable
 
         if (enter)
         {
-            await cut.Find("input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, "input", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
         }
 
         IElement status = Bar.Find(".main-status");
@@ -220,7 +220,7 @@ public sealed class SettingsPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
         await Type(cut, value);
 
-        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
 
         IElement status = Bar.Find(".main-status");
         Assert.Equal(InvalidText, status.TextContent);
@@ -243,14 +243,14 @@ public sealed class SettingsPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
         await Type(cut, OtherLink);
 
-        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal(ReplaceQuestion, cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Replace", cut.Find("[role=dialog] button.confirm").TextContent);
         Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal(before, FileSnapshot.Take(data.Root));
 
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
@@ -267,8 +267,8 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
         await Type(cut, OtherLink);
 
-        await cut.Find("input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.KeyDownAsync(cut, "input", new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Calendar link saved (https://other.example/…).", data.StatusBar.Text);
@@ -289,16 +289,16 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
 
-        await cut.Find("button.calendar-link-remove").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.calendar-link-remove");
 
         Assert.Equal(RemoveQuestion, cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Remove", cut.Find("[role=dialog] button.confirm").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
 
-        await cut.Find("button.calendar-link-remove").ClickAsync(new MouseEventArgs());
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.calendar-link-remove");
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         IElement status = Bar.Find(".main-status");
         Assert.Equal("Calendar link removed.", status.TextContent);
@@ -320,12 +320,12 @@ public sealed class SettingsPanelTests : IDisposable
 
         data.SaveLink(FakeHttpHandler.Link);
         IRenderedComponent<SettingsPanel> cut = await Show();
-        await cut.Find("button.calendar-link-remove").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.calendar-link-remove");
         UnixFileMode mode = File.GetUnixFileMode(data.Root);
         File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         }
         finally
         {
@@ -423,7 +423,7 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>(p => p.Add(s => s.OnClose, () => closed++));
         await Type(cut, FakeHttpHandler.Link);
 
-        await cut.Find("button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.close");
 
         Assert.Equal(1, closed);
         Assert.Equal(string.Empty, TypedCopy(cut));
@@ -464,7 +464,7 @@ public sealed class SettingsPanelTests : IDisposable
         // Typing and saving.
         await Type(cut, MarkerLink);
         Clean();
-        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal("Calendar link saved (https://outlook.example/…).", data.StatusBar.Text);
         Assert.Equal(MarkerLink + "\n", File.ReadAllText(LinkPath));
         cut.WaitForAssertion(() => Assert.StartsWith("Calendar link: https://outlook.example/…", cut.Find(".calendar-link-state").TextContent), Wait);
@@ -473,18 +473,18 @@ public sealed class SettingsPanelTests : IDisposable
 
         // Refused: an invalid value that holds the marker.
         await Type(cut, "http://outlook.example/" + Marker);
-        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal(InvalidText, data.StatusBar.Text);
         Clean();
 
         // Replaced: asked, cancelled, asked again, confirmed.
         await Type(cut, OtherMarkerLink);
-        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal(ReplaceQuestion, cut.Find("[role=dialog] .question").TextContent);
         Clean();
         await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Clean();
-        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
         await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         Assert.Equal("Calendar link saved (https://other.example/…).", data.StatusBar.Text);
         Assert.Equal(OtherMarkerLink + "\n", File.ReadAllText(LinkPath));
@@ -495,7 +495,7 @@ public sealed class SettingsPanelTests : IDisposable
         if (!OperatingSystem.IsWindows())
         {
             await Type(cut, MarkerLink);
-            await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".calendar-link-field", new KeyboardEventArgs { Key = "Enter" });
             UnixFileMode mode = File.GetUnixFileMode(data.Root);
             File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
             try
@@ -602,7 +602,7 @@ public sealed class SettingsPanelTests : IDisposable
     {
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
+        await StaleClick.ChangeAsync(cut, "input.outlook-enabled", new ChangeEventArgs { Value = true });
 
         Bar.WaitForAssertion(() =>
         {
@@ -616,7 +616,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".outlook-result"));
         Assert.True(new SettingsStore(data.Root).ReadOutlook());
 
-        await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = false });
+        await StaleClick.ChangeAsync(cut, "input.outlook-enabled", new ChangeEventArgs { Value = false });
 
         Bar.WaitForAssertion(() =>
         {
@@ -638,7 +638,7 @@ public sealed class SettingsPanelTests : IDisposable
         byte[] before = File.ReadAllBytes(path);
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
+        await StaleClick.ChangeAsync(cut, "input.outlook-enabled", new ChangeEventArgs { Value = true });
 
         cut.WaitForAssertion(
             () => Assert.Equal("Can't read settings.json. Nothing was saved.", data.StatusBar.Text),
@@ -684,7 +684,7 @@ public sealed class SettingsPanelTests : IDisposable
         data.WriteFile(SettingsStore.FileName, "{\"theme\":\"dark\",\"outlook\":{\"enabled\":true},\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"}]}");
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = true });
+        await StaleClick.ChangeAsync(cut, "input.fetch-titles", new ChangeEventArgs { Value = true });
 
         Bar.WaitForAssertion(() =>
         {
@@ -701,7 +701,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Single(store.ReadSavedSearches());
         Assert.Contains("\"theme\": \"dark\"", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
 
-        await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = false });
+        await StaleClick.ChangeAsync(cut, "input.fetch-titles", new ChangeEventArgs { Value = false });
 
         Bar.WaitForAssertion(() =>
         {
@@ -725,7 +725,7 @@ public sealed class SettingsPanelTests : IDisposable
         byte[] before = File.ReadAllBytes(path);
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = true });
+        await StaleClick.ChangeAsync(cut, "input.fetch-titles", new ChangeEventArgs { Value = true });
 
         cut.WaitForAssertion(
             () => Assert.Equal("Can't save settings.json.", data.StatusBar.Text), Wait);
@@ -756,7 +756,7 @@ public sealed class SettingsPanelTests : IDisposable
                 return;
             }
 
-            await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = false });
+            await StaleClick.ChangeAsync(cut, "input.fetch-titles", new ChangeEventArgs { Value = false });
 
             cut.WaitForAssertion(
                 () => Assert.Equal("Can't save settings.json.", data.StatusBar.Text), Wait);
@@ -967,7 +967,7 @@ public sealed class SettingsPanelTests : IDisposable
                 return;
             }
 
-            await cut.Find("button.theme-system").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.theme-system");
 
             cut.WaitForAssertion(
                 () => Assert.Equal(DesktopActions.SettingsNotSavedText, data.StatusBar.Text), Wait);
@@ -994,7 +994,7 @@ public sealed class SettingsPanelTests : IDisposable
             release.Wait(Wait);
         };
 
-        Task click = cut.Find("button.theme-dark").ClickAsync(new MouseEventArgs());
+        Task click = StaleClick.ClickAsync(cut, "button.theme-dark");
         try
         {
             Assert.True(entered.Wait(Wait));
@@ -1168,14 +1168,14 @@ public sealed class SettingsPanelTests : IDisposable
         Directory.CreateDirectory(folder);
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("input.screenshot-folder-field").InputAsync(new ChangeEventArgs { Value = folder });
+        await StaleClick.InputAsync(cut, "input.screenshot-folder-field", new ChangeEventArgs { Value = folder });
         if (enter)
         {
-            await cut.Find("input.screenshot-folder-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, "input.screenshot-folder-field", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find("button.screenshot-folder-save").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.screenshot-folder-save");
         }
 
         Bar.WaitForAssertion(() =>
@@ -1190,7 +1190,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".screenshot-folder-missing"));
         Assert.Equal(folder, new SettingsStore(data.Root).ReadScreenshotFolder());
 
-        await cut.Find("button.screenshot-folder-remove").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.screenshot-folder-remove");
 
         Bar.WaitForAssertion(() =>
         {
@@ -1209,8 +1209,8 @@ public sealed class SettingsPanelTests : IDisposable
     {
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        await cut.Find("input.screenshot-folder-field").InputAsync(new ChangeEventArgs { Value = "relative/shots" });
-        await cut.Find("button.screenshot-folder-save").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.screenshot-folder-field", new ChangeEventArgs { Value = "relative/shots" });
+        await StaleClick.ClickAsync(cut, "button.screenshot-folder-save");
 
         cut.WaitForAssertion(
             () => Assert.Equal("Type the folder's full path.", data.StatusBar.Text), Wait);
@@ -1359,7 +1359,7 @@ public sealed class SettingsPanelTests : IDisposable
 
     private static Task Type<T>(IRenderedComponent<T> cut, string value)
         where T : IComponent =>
-        cut.Find("input.calendar-link-field").InputAsync(new ChangeEventArgs { Value = value });
+        StaleClick.InputAsync(cut, "input.calendar-link-field", new ChangeEventArgs { Value = value });
 
     // The component's own copy of what was typed.
     private static string TypedCopy(IRenderedComponent<SettingsPanel> cut) =>

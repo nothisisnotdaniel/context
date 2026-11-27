@@ -32,15 +32,15 @@ public sealed class RecentNotesActionsTests : IDisposable
         WaitListed(cut, "Plan");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel button.name")), Wait);
-        await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".links-panel button.name");
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
         WaitListed(cut, "Other", "Plan");
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         WaitListed(cut, "2026-10-29", "Other", "Plan");
 
-        await cut.Find("ul.recent-notes button.name[title='Plan']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "ul.recent-notes button.name[title='Plan']");
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         WaitListed(cut, "Plan", "2026-10-29", "Other");
         Assert.Equal("page", cut.Find("ul.recent-notes button.name[title='Plan']").GetAttribute("aria-current"));
@@ -88,16 +88,16 @@ public sealed class RecentNotesActionsTests : IDisposable
         WaitListed(cut, "A", "C", "A/Sub");
 
         await MainTests.ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "D" });
-        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "D" });
+        await StaleClick.KeyDownAsync(cut, ".rename-title", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("D", cut.Find(".note-title").TextContent), Wait);
         WaitListed(cut, "D", "C", "D/Sub");
         data.WaitForRecentWrites();
         Assert.Equal(["D", "C", "D/Sub"], new RecentNotesStore(data.Root).Read());
 
         await MainTests.ChooseAsync(cut, "move");
-        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "C" });
-        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".move-parent", new ChangeEventArgs { Value = "C" });
+        await StaleClick.KeyDownAsync(cut, ".move-parent", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("Moved to C/D", cut.Find(".main-status").TextContent), Wait);
         WaitListed(cut, "C/D", "C", "C/D/Sub");
         Assert.Equal("page", cut.Find("ul.recent-notes button.name[title='C/D']").GetAttribute("aria-current"));
@@ -119,15 +119,15 @@ public sealed class RecentNotesActionsTests : IDisposable
         WaitListed(cut, "C", "A");
 
         await MainTests.ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "D" });
-        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "D" });
+        await StaleClick.KeyDownAsync(cut, ".rename-title", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("D", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         WaitListed(cut, "C", "D");
 
         await MainTests.ChooseAsync(cut, "move");
-        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "C" });
-        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".move-parent", new ChangeEventArgs { Value = "C" });
+        await StaleClick.KeyDownAsync(cut, ".move-parent", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("Moved to C/D", cut.Find(".main-status").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         WaitListed(cut, "C", "C/D");
@@ -149,7 +149,7 @@ public sealed class RecentNotesActionsTests : IDisposable
         WaitListed(cut, "A", "B", "A/Sub");
 
         await MainTests.ChooseAsync(cut, "delete");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.False(File.Exists(Path.Combine(data.Root, "A.md"))), Wait);
         WaitListed(cut, "B");
@@ -379,8 +379,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Other");
 
-        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Fresh" });
-        await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".note-new-title", new ChangeEventArgs { Value = "Fresh" });
+        await StaleClick.KeyDownAsync(cut, ".note-new-title", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("# Fresh\n", File.ReadAllText(Path.Combine(data.Root, "Fresh.md")));
@@ -395,7 +395,7 @@ public sealed class RecentNotesActionsTests : IDisposable
         data.WriteFile(SettingsStore.FileName, "{\"savedSearches\":[{\"name\":\"Money\",\"query\":\"budget\"}]}");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".notes-region button.saved-search").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".notes-region button.saved-search");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
         cut.WaitForAssertion(() => Assert.Contains("Plan", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
@@ -452,10 +452,10 @@ public sealed class RecentNotesActionsTests : IDisposable
         WaitListed(cut, listed);
 
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.people-open");
         // The panel re-renders once its attributes load, which gives each row a new handler, so find the row after.
         cut.WaitForState(() => cut.FindComponent<PeoplePanel>().Instance.Loaded, Wait);
-        await cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Bob").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Bob"), e => e.ClickAsync(new MouseEventArgs()));
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.Equal("people/Bob", cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);

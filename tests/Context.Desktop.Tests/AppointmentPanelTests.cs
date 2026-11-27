@@ -406,7 +406,7 @@ public sealed class AppointmentPanelTests : IDisposable
     }
 
     private string? LastFocusId() =>
-        data.Bunit.JSInterop.Invocations.LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus") is
+        data.JsCalls().LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus") is
             { Arguments: [ElementReference target, ..] }
             ? target.Id
             : null;
@@ -745,7 +745,7 @@ public sealed class AppointmentPanelTests : IDisposable
     {
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         await cut.InvokeAsync(() => { });
-        await cut.FindAll(".appointment-page li.topic input.done")[0].ChangeAsync(new ChangeEventArgs { Value = true });
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".appointment-page li.topic input.done")[0], e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
     }
 
     // "the dialog question is Mark this topic done? budget", then the confirm click.

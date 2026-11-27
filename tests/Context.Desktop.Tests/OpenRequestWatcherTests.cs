@@ -69,7 +69,7 @@ public sealed class OpenRequestWatcherTests : IDisposable
 
         DesktopRequest.WriteItem(root, 42);
         WaitProcessed(watcher, 1);
-        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait));
+        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait), $"the request file was not deleted within {Wait}");
         DesktopRequest.WriteItem(root, 7);
         WaitProcessed(watcher, 2);
 
@@ -91,7 +91,7 @@ public sealed class OpenRequestWatcherTests : IDisposable
 
         WriteRaw(Encoding.UTF8.GetBytes(content));
         WaitProcessed(watcher, 1);
-        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait));
+        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait), $"the request file was not deleted within {Wait}");
         DesktopRequest.WriteItem(root, 5);
         WaitProcessed(watcher, 2);
 
@@ -139,7 +139,7 @@ public sealed class OpenRequestWatcherTests : IDisposable
 
         Assert.Equal(1, Volatile.Read(ref shown));
         Assert.Empty(requested);
-        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait));
+        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait), $"the request file was not deleted within {Wait}");
     }
 
     // 315 AC-7: the request DesktopRequest.WriteShow leaves at start is handled like any other.
@@ -168,7 +168,7 @@ public sealed class OpenRequestWatcherTests : IDisposable
 
         WriteRaw(Encoding.ASCII.GetBytes(content));
         WaitProcessed(watcher, 1);
-        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait));
+        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait), $"the request file was not deleted within {Wait}");
         DesktopRequest.WriteItem(root, 5);
         WaitProcessed(watcher, 2);
 

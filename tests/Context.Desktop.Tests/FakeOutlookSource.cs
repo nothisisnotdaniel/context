@@ -3,10 +3,16 @@ namespace Context.Tests;
 /// <summary>
 /// An Outlook source in memory: the test sets the availability, the kind and the items each call answers, and can
 /// make a call throw or block on a gate until <see cref="Release"/> (or <see cref="Dispose"/>). It counts the calls
-/// and records their arguments; it never touches COM or Outlook.
+/// and records their arguments; it never touches COM or Outlook. A blocked read waits at most its release bound
+/// (30 s unless the ctor sets one, job 491), then throws a <see cref="TimeoutException"/> that says
+/// <see cref="Release"/> was not called, so a test that fails before it releases never blocks a pool thread forever.
 /// </summary>
-internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
+internal sealed class FakeOutlookSource(TimeSpan? releaseBound = null) : IOutlookSource, IDisposable
 {
+    /// <summary>The longest a blocked read waits for <see cref="Release"/> unless the ctor sets a bound.</summary>
+    public static readonly TimeSpan DefaultReleaseBound = TimeSpan.FromSeconds(30);
+
+    private readonly TimeSpan releaseBound = releaseBound ?? DefaultReleaseBound;
     private readonly object gate = new();
     private readonly ManualResetEventSlim open = new(initialState: true);
     private readonly List<(DateOnly Day, TimeZoneInfo Zone)> appointmentCalls = [];
@@ -97,7 +103,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
             appointmentCalls.Add((day, zone));
         }
 
-        open.Wait();
+        WaitForRelease();
         if (Throws is not null)
         {
             throw Throws;
@@ -118,7 +124,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
             mailCalls.Add((sinceUtc, max));
         }
 
-        open.Wait();
+        WaitForRelease();
         if (Throws is not null)
         {
             throw Throws;
@@ -132,6 +138,15 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
         lock (gate)
         {
             return new OutlookRead<MailMessage>(OutlookReadKind.Ok, [.. Mails]);
+        }
+    }
+
+    // Waits for the gate with the release bound; past it the read fails, naming what it waited for.
+    private void WaitForRelease()
+    {
+        if (!open.Wait(releaseBound))
+        {
+            throw new TimeoutException($"FakeOutlookSource: Release() not called within {BoundedWait.Describe(releaseBound)}");
         }
     }
 

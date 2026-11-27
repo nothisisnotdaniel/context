@@ -1,4 +1,5 @@
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -97,8 +98,8 @@ public sealed class DoneLogActionsTests : IDisposable
         File.WriteAllBytes(DonePath, full);
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
-        cut.Find("li.todo input[type=checkbox]").Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        StaleClick.Fire(() => cut.Find("li.todo input[type=checkbox]"), e => e.ChangeAsync(new ChangeEventArgs { Value = true }));
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Bar.WaitForAssertion(() =>
         {

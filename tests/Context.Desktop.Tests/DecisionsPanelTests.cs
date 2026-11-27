@@ -70,8 +70,8 @@ public sealed class DecisionsPanelTests : IDisposable
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Empty(cut.FindAll("p[role=status]"));
 
-        await row.QuerySelector("button.note-button")!.ClickAsync(new MouseEventArgs());
-        await cut.Find("button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".decision-rows li")[1].QuerySelector("button.note-button")!, e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.ClickAsync(cut, "button.close");
 
         Assert.Equal(["meetings/2026-11-10 Weekly sync"], opened);
         Assert.Equal(1, closed);
@@ -89,13 +89,13 @@ public sealed class DecisionsPanelTests : IDisposable
         Assert.Equal("false", cut.Find("button.decision-expand").GetAttribute("aria-expanded"));
         Assert.Equal("Show full text", cut.Find("button.decision-expand").TextContent);
 
-        await cut.Find("button.decision-expand").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.decision-expand");
 
         Assert.Equal("true", cut.Find("button.decision-expand").GetAttribute("aria-expanded"));
         Assert.Equal("Hide full text", cut.Find("button.decision-expand").TextContent);
         Assert.Equal("one\ntwo\uFFFD words", cut.Find("p.decision-full").TextContent);
 
-        await cut.Find("button.decision-expand").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.decision-expand");
 
         Assert.Empty(cut.FindAll("p.decision-full"));
         Assert.Equal("false", cut.Find("button.decision-expand").GetAttribute("aria-expanded"));
@@ -117,9 +117,9 @@ public sealed class DecisionsPanelTests : IDisposable
             .Add(c => c.OnOpenDecision, ((string Name, string Decision) d) => jumps.Add(d)));
         cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan", "2026-11-09 Old"], NoteNames(cut)), Wait);
 
-        await cut.FindAll(".decision-rows li")[0].QuerySelector(".decision-number button")!.ClickAsync(new MouseEventArgs());
-        await cut.FindAll(".decision-rows li")[0].QuerySelector(".text button")!.ClickAsync(new MouseEventArgs());
-        await cut.FindAll(".decision-rows li")[1].QuerySelector(".text button")!.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".decision-rows li")[0].QuerySelector(".decision-number button")!, e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".decision-rows li")[0].QuerySelector(".text button")!, e => e.ClickAsync(new MouseEventArgs()));
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".decision-rows li")[1].QuerySelector(".text button")!, e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal([("2026-11-10 Plan", "ab12-3"), ("2026-11-10 Plan", "ab12-3")], jumps);
         Assert.Equal(["2026-11-09 Old"], opened);
@@ -146,16 +146,16 @@ public sealed class DecisionsPanelTests : IDisposable
         Assert.Equal("Copy", copy.TextContent);
         Assert.Equal("Copy reference to Decision zz99-4", copy.GetAttribute("aria-label"));
 
-        await cut.FindAll("button.decision-copy")[0].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("button.decision-copy")[0], e => e.ClickAsync(new MouseEventArgs()));
         Bar.WaitForAssertion(() => Assert.Equal("Copied #!d1234.", data.StatusBar.Text), Wait);
         Assert.Equal("grey", data.StatusBar.Css);
 
-        await cut.FindAll("button.decision-copy")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("button.decision-copy")[1], e => e.ClickAsync(new MouseEventArgs()));
         Bar.WaitForAssertion(() => Assert.Equal("Copied #!dzz99-4.", data.StatusBar.Text), Wait);
 
         Assert.Equal(
             ["#!d1234", "#!dzz99-4"],
-            data.Bunit.JSInterop.Invocations["ContextEditor.copyToClipboard"].Select(i => (string)i.Arguments[0]!));
+            data.JsCalls("ContextEditor.copyToClipboard").Select(i => (string)i.Arguments[0]!));
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
@@ -169,7 +169,7 @@ public sealed class DecisionsPanelTests : IDisposable
         IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);
         cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan"], NoteNames(cut)), Wait);
 
-        await cut.Find("button.decision-copy").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.decision-copy");
 
         Bar.WaitForAssertion(() => Assert.Equal("Can't copy #!d7.", data.StatusBar.Text), Wait);
         Assert.Equal("red", data.StatusBar.Css);

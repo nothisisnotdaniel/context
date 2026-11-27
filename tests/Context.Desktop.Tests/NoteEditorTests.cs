@@ -56,7 +56,7 @@ public sealed class NoteEditorTests : IDisposable
 
         await cut.InvokeAsync(() => cut.Instance.ReloadAsync());
         js.Edit("* star\n\n__b__ more\n");
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved Plan.", data.StatusBar.Text);
         Assert.Empty(cut.FindAll(".lossy"));
@@ -195,7 +195,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.False(cut.Instance.IsReady);
         Assert.Null(await cut.InvokeAsync(() => cut.Instance.PrepareSaveAsync()));
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
         Assert.Empty(js.Calls("ContextEditor.isDirty"));
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
         Assert.Equal(before, File.ReadAllBytes(path));
@@ -242,7 +242,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         js.Edit("# Plan\n\nMore #new\n");
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("# Plan\n\nMore #new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         IElement status = Bar.Find(".main-status");
@@ -263,12 +263,12 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         js.Edit("# Plan\n\nSaved by key\n");
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "a", CtrlKey = ctrl, MetaKey = meta });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "a", CtrlKey = ctrl, MetaKey = meta });
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s" });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s" });
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = ctrl, MetaKey = meta });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = ctrl, MetaKey = meta });
 
         Assert.Equal("# Plan\n\nSaved by key\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Saved Plan.", data.StatusBar.Text);
@@ -286,7 +286,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
@@ -303,7 +303,7 @@ public sealed class NoteEditorTests : IDisposable
         js.Edit("# Plan\n\nMine\n");
         data.WriteNote("Plan", "# Theirs\n");
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("# Theirs\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         IElement status = Bar.Find(".main-status");
@@ -324,7 +324,7 @@ public sealed class NoteEditorTests : IDisposable
         js.Edit("# Plan\n\nMine\n");
         File.Delete(Path.Combine(data.Root, "Plan.md"));
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Plan no longer exists. Nothing was saved.", data.StatusBar.Text);
@@ -473,7 +473,7 @@ public sealed class NoteEditorTests : IDisposable
             entered.Set();
             release.Wait(Wait);
         };
-        Task key = cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        Task key = StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
         Assert.True(entered.Wait(Wait));
         Bar.WaitForAssertion(() => Assert.Equal("Saving…", data.StatusBar.Text), Wait);
 
@@ -556,7 +556,7 @@ public sealed class NoteEditorTests : IDisposable
 
         if (ctrl || meta)
         {
-            await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = ctrl, MetaKey = meta });
+            await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = ctrl, MetaKey = meta });
         }
         else
         {
@@ -588,7 +588,7 @@ public sealed class NoteEditorTests : IDisposable
             data.WriteNote("Plan", "# Theirs\n");
         }
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         IElement status = Bar.Find(".main-status");
         Assert.Equal(expected, status.TextContent);
@@ -658,7 +658,7 @@ public sealed class NoteEditorTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
-        int calls = data.Bunit.JSInterop.Invocations.Count;
+        int calls = data.JsCalls().Count;
         List<bool> raised = [];
         js.Page().DirtyChanged += value =>
         {
@@ -669,7 +669,7 @@ public sealed class NoteEditorTests : IDisposable
         await cut.InvokeAsync(() => js.Page().OnDirty(true));
 
         Assert.Equal([true], raised);
-        Assert.Equal(calls, data.Bunit.JSInterop.Invocations.Count);
+        Assert.Equal(calls, data.JsCalls().Count);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Single(cut.FindAll(".dirty-dot"));
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
@@ -718,7 +718,7 @@ public sealed class NoteEditorTests : IDisposable
     }
 
     private EditorInterop PageOf(IRenderedComponent<NoteEditor> cut) =>
-        ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.Bunit.JSInterop.Invocations
+        ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.JsCalls()
             .Last(i => i.Identifier == "ContextEditor.mount").Arguments[2]!).Value;
 
     // 202 AC-7: the page editor gets the note's name as mount's 5th argument (210: isLossless is never asked).
@@ -765,7 +765,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("# inbox\n- captured\n", js.MountedText());
 
         js.Edit("# inbox\n- captured\n- more\n");
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved inbox.", data.StatusBar.Text);
         Assert.Equal("# inbox\n- captured\n- more\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
@@ -788,7 +788,7 @@ public sealed class NoteEditorTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         js.Edit(System.Text.Json.JsonSerializer.Deserialize<string>(page)!);
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved Plan.", data.StatusBar.Text);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
@@ -977,7 +977,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("grey", data.StatusBar.Css);
         int asked = js.Calls("ContextEditor.isDirty").Count;
 
-        Task key = cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        Task key = StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
         Task<bool> first = cut.InvokeAsync(() => cut.Instance.SaveFirstAsync());
 
         Assert.False(key.IsCompleted);
@@ -1068,7 +1068,7 @@ public sealed class NoteEditorTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         js.Edit("# Plan\n\nFirst\n");
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
         Assert.Equal("Saved Plan.", data.StatusBar.Text);
         using ManualResetEventSlim entered = new ManualResetEventSlim();
         using ManualResetEventSlim release = new ManualResetEventSlim();
@@ -1119,7 +1119,7 @@ public sealed class NoteEditorTests : IDisposable
         }
         else
         {
-            await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = how == "ctrl", MetaKey = how == "meta" });
+            await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = how == "ctrl", MetaKey = how == "meta" });
         }
 
         Assert.Equal("Saved Plan.", data.StatusBar.Text);
@@ -1313,7 +1313,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
         Assert.Empty(cut.FindAll("span.dirty-dot"));
 
-        await cut.FindAll("input.attribute-value")[1].ChangeAsync(new ChangeEventArgs { Value = "  lead \t  dev " });
+        await StaleClick.FireAsync(cut, () => cut.FindAll("input.attribute-value")[1], e => e.ChangeAsync(new ChangeEventArgs { Value = "  lead \t  dev " }));
 
         Assert.Equal(
             ["[{\"line\":0,\"key\":\"aliases\",\"value\":\"A, B\"},{\"line\":1,\"key\":\"Role\",\"value\":\"lead dev\"}]"],
@@ -1339,7 +1339,7 @@ public sealed class NoteEditorTests : IDisposable
         js.SetAttributeRows(PersonRows);
         IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
 
-        await cut.FindAll("input.attribute-value")[1].ChangeAsync(new ChangeEventArgs { Value = new string('v', 500) });
+        await StaleClick.FireAsync(cut, () => cut.FindAll("input.attribute-value")[1], e => e.ChangeAsync(new ChangeEventArgs { Value = new string('v', 500) }));
 
         string edits = Assert.Single(js.AttributeEdits());
         Assert.Contains("\"value\":\"" + new string('v', 400) + "\"}", edits, StringComparison.Ordinal);
@@ -1355,7 +1355,7 @@ public sealed class NoteEditorTests : IDisposable
         js.SetAttributeRows(PersonRows);
         IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
 
-        await cut.FindAll("button.attribute-remove")[0].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll("button.attribute-remove")[0], e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Equal(["[{\"line\":1,\"key\":\"Role\",\"value\":\"\"}]"], js.AttributeEdits());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("span.dirty-dot")), Wait);
@@ -1376,9 +1376,9 @@ public sealed class NoteEditorTests : IDisposable
         js.SetAttributeRows(PersonRows);
         IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
 
-        await cut.Find("input.attribute-new-key").InputAsync(new ChangeEventArgs { Value = name });
-        await cut.Find("input.attribute-new-value").InputAsync(new ChangeEventArgs { Value = "x" });
-        await cut.Find("button.attribute-add-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.attribute-new-key", new ChangeEventArgs { Value = name });
+        await StaleClick.InputAsync(cut, "input.attribute-new-value", new ChangeEventArgs { Value = "x" });
+        await StaleClick.ClickAsync(cut, "button.attribute-add-button");
 
         IElement error = cut.Find(".note-attributes p.attribute-error");
         Assert.Equal("Type an attribute name that starts with a letter.", error.TextContent);
@@ -1397,9 +1397,9 @@ public sealed class NoteEditorTests : IDisposable
         js.SetAttributeRows(PersonRows);
         IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
 
-        await cut.Find("input.attribute-new-key").InputAsync(new ChangeEventArgs { Value = "  Start-Date_2 " });
-        await cut.Find("input.attribute-new-value").InputAsync(new ChangeEventArgs { Value = "  2026  11 " });
-        await cut.Find("button.attribute-add-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.InputAsync(cut, "input.attribute-new-key", new ChangeEventArgs { Value = "  Start-Date_2 " });
+        await StaleClick.InputAsync(cut, "input.attribute-new-value", new ChangeEventArgs { Value = "  2026  11 " });
+        await StaleClick.ClickAsync(cut, "button.attribute-add-button");
 
         Assert.Equal(
             ["[{\"line\":0,\"key\":\"aliases\",\"value\":\"A, B\"},{\"line\":1,\"key\":\"Role\",\"value\":\"\"},{\"line\":-1,\"key\":\"start-date_2\",\"value\":\"2026 11\"}]"],
@@ -1463,7 +1463,7 @@ public sealed class NoteEditorTests : IDisposable
         cut.WaitForAssertion(() => Assert.NotEmpty(js.Calls("ContextEditor.mount")), Wait);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".format-bar")), Wait);
 
-        await cut.FindAll(".format-bar button").Single(b => b.TextContent == label).ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".format-bar button").Single(b => b.TextContent == label), e => e.ClickAsync(new MouseEventArgs()));
 
         JSRuntimeInvocation call = Assert.Single(js.Calls(called));
         Assert.Equal(js.Calls("ContextEditor.mount")[^1].Arguments[0], call.Arguments[0]);

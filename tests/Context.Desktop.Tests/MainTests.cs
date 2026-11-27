@@ -211,7 +211,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }
 
@@ -248,10 +248,10 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
-        await cut.Find(".todos-region button.todo-note").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".todos-region button.todo-note");
 
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Meeting", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
         Assert.Equal("# Meeting\n- { } call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
@@ -267,12 +267,12 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
-        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Fresh" });
-        await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".note-new-title", new ChangeEventArgs { Value = "Fresh" });
+        await StaleClick.KeyDownAsync(cut, ".note-new-title", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }
 
@@ -334,15 +334,15 @@ public sealed class MainTests : IDisposable
         Assert.Equal("text", cut.Find(".rename-title").GetAttribute("type"));
         Assert.Empty(cut.FindAll(".page-menu"));
         Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
-        AssertFocused(cut, ".rename-title");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        AssertFocused<Main>(cut, "renameField");
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
         if (enter)
         {
-            await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".rename-title", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
         }
 
         // 353: the matching title line is rewritten in the same action.
@@ -366,15 +366,15 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
 
         if (esc)
         {
-            await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, ".rename-title", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find(".note-toolbar button.cancel-rename").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".note-toolbar button.cancel-rename");
         }
 
         Assert.Empty(cut.FindAll(".rename-title"));
@@ -412,10 +412,10 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Equal("Project", cut.Find(".rename-title").GetAttribute("value"));
@@ -433,9 +433,9 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "other" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "other" });
 
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Note other already exists.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -453,18 +453,18 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForElement("[role=dialog]", Wait);
         Assert.Equal("Rename Plan to Project? Links in 1 note will be updated.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Rename", cut.Find("[role=dialog] button.confirm").TextContent);
-        AssertFocused(cut, "[role=dialog] button.cancel");
+        AssertFocused<ConfirmDialog>(cut, "cancelButton");
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
 
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Contains("Renamed to", cut.Find(".main-status").TextContent, StringComparison.Ordinal), Wait);
         Assert.Equal("Renamed to Project. Updated links in 1 note.", cut.Find(".main-status").TextContent);
@@ -487,18 +487,18 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForElement("[role=dialog]", Wait);
 
         if (esc)
         {
-            await cut.Find("[role=dialog]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, "[role=dialog]", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         }
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("[role=dialog]")), Wait);
@@ -519,11 +519,11 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForElement("[role=dialog]", Wait);
 
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Contains("Renamed to", cut.Find(".main-status").TextContent, StringComparison.Ordinal), Wait);
         Assert.Equal(
@@ -542,12 +542,12 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Pro#ject" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Pro#ject" });
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForElement("[role=dialog]", Wait);
 
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal(
             "Links to Plan can't be written with the name Pro#ject. Nothing was renamed.",
@@ -571,7 +571,7 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("Delete Plan? This can't be undone.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Delete", cut.Find("[role=dialog] button.confirm").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.True(File.Exists(Path.Combine(data.Root, "Plan.md")));
@@ -588,7 +588,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
 
         await ChooseAsync(cut, "delete");
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md"))), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain(
@@ -639,14 +639,14 @@ public sealed class MainTests : IDisposable
             < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
         Assert.Equal("Linked notes", cut.Find(".links-panel h2").TextContent);
 
-        await cut.Find(".links-panel .link-tags button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".links-panel .link-tags button");
         cut.WaitForAssertion(() => Assert.Equal(
             ["Other", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("#work", cut.Find(".tag-panel h2 .accent").TextContent);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
 
-        await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".links-panel button.name");
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         cut.WaitForAssertion(() => Assert.Equal(
@@ -666,11 +666,11 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel button.name")), Wait);
         js.EditUnsavable("[[Other]]\n\nUnsaved\n");
 
-        await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".links-panel button.name");
 
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
     }
 
@@ -691,10 +691,10 @@ public sealed class MainTests : IDisposable
             ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()), Wait);
 
         await ChooseAsync(cut, "rename");
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
-        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Project" });
+        await StaleClick.KeyDownAsync(cut, ".rename-title", new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForElement("[role=dialog]", Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(
@@ -755,7 +755,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")), Wait);
         await RunPalette(cut, "/tags");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel .tag-list button")), Wait);
-        await cut.Find(".tags-panel .tag-list button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".tags-panel .tag-list button");
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".tag-panel .note-button").Count), Wait);
         await data.State!.Refresh();
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")), Wait);
@@ -782,7 +782,7 @@ public sealed class MainTests : IDisposable
         }
         else
         {
-            await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.settings-open");
         }
 
         Assert.Equal("top-bar", cut.Find("main.current-region").Children[0].ClassName);
@@ -792,7 +792,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes", "Suite Pro", "Version"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
         Assert.Empty(cut.FindAll(".palette"));
 
-        await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".settings-panel button.close");
 
         Assert.Empty(cut.FindAll(".settings-panel"));
     }
@@ -813,7 +813,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
 
         Assert.Single(cut.FindAll("button.page-menu-open"));
-        await cut.Find("button." + button).ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button." + button);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(page).TextContent, StringComparison.Ordinal), Wait);
 
         Assert.Empty(cut.FindAll("button.page-menu-open"));
@@ -828,7 +828,7 @@ public sealed class MainTests : IDisposable
         Assert.Single(cut.FindAll(".page > .panel-bar button.close"));
         Assert.Single(cut.FindAll(".todos-region .todos"));
 
-        await close.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".page > .panel-bar button.close"), e => e.ClickAsync(new MouseEventArgs()));
 
         Assert.Empty(cut.FindAll(".page"));
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
@@ -843,11 +843,11 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Plan", "# Plan\n- { } call Anna\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("button.todos-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.todos-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".all-todos-panel button.todo-note")), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".todos-region").TextContent, StringComparison.Ordinal), Wait);
 
-        await cut.Find(".all-todos-panel button.todo-note").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".all-todos-panel button.todo-note");
 
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".all-todos-panel"));
@@ -861,11 +861,11 @@ public sealed class MainTests : IDisposable
         data.WriteCalendar("meetings.ics", DesktopFixture.Calendar(MeetingCalendar.Sync()));
         MeetingCalendar.Store(data).Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("button.todos-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.todos-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".all-todos-panel button.todo-meeting")), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".todos-region").TextContent, StringComparison.Ordinal), Wait);
 
-        await cut.Find(".all-todos-panel button.todo-meeting").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".all-todos-panel button.todo-meeting");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page")), Wait);
         Assert.Empty(cut.FindAll(".all-todos-panel"));
@@ -883,7 +883,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         Assert.Single(cut.FindAll("button.page-menu-open"));
 
-        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.triage-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
 
         Assert.Empty(cut.FindAll("button.page-menu-open"));
@@ -899,9 +899,9 @@ public sealed class MainTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.tags-open");
         Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
-        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page > .panel-bar button.close");
 
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
     }
@@ -912,8 +912,8 @@ public sealed class MainTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
-        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.tags-open");
+        await StaleClick.ClickAsync(cut, "button.triage-open");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll(".triage-panel"));
 
@@ -936,27 +936,27 @@ public sealed class MainTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.people-open");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll("section.people-panel"));
         Assert.True(cut.Find("div.note-area").HasAttribute("hidden"));
 
-        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.tags-open");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll(".tags-panel"));
         Assert.Empty(cut.FindAll(".people-panel"));
 
-        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.people-open");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll(".people-panel"));
         Assert.Empty(cut.FindAll(".tags-panel"));
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll(".settings-panel"));
         Assert.Empty(cut.FindAll(".people-panel"));
 
-        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.people-open");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll(".people-panel"));
         Assert.Empty(cut.FindAll(".settings-panel"));
@@ -974,10 +974,10 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         int mounts = js.Calls("ContextEditor.mount").Count;
 
-        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.people-open");
         // The panel re-renders once its attributes load, which gives each row a new handler, so find the row after.
         cut.WaitForState(() => cut.FindComponent<PeoplePanel>().Instance.Loaded, Wait);
-        await cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Anna").ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Anna"), e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
@@ -1007,17 +1007,17 @@ public sealed class MainTests : IDisposable
         js.EditUnsavable("# Plan\n\nUnsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, "context.db");
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
-        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
+        await StaleClick.ClickAsync(cut, ".page > .panel-bar button.close");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(before, FileSnapshot.Take(data.Root, "context.db"));
         Assert.Single(cut.FindAll(".note-editor"));
 
-        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.tags-open");
         await NoteOpener.OpenAsync(cut, "Other");
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() =>
         {
             Assert.Equal("Other", cut.Find(".note-title").TextContent);
@@ -1030,10 +1030,10 @@ public sealed class MainTests : IDisposable
     public async Task Page_TriageEscape_ClosesIt()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.triage-open");
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".triage-panel").TextContent, StringComparison.Ordinal), Wait);
 
-        await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, ".triage-panel", new KeyboardEventArgs { Key = "Escape" });
 
         Assert.Empty(cut.FindAll(".page"));
     }
@@ -1046,20 +1046,20 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         Assert.Single(cut.FindAll(".settings-panel"));
         await Open(cut, js, "Plan");
         Assert.Empty(cut.FindAll(".settings-panel"));
 
         // The note that is already open hides them too.
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         Assert.Single(cut.FindAll(".settings-panel"));
         await NoteOpener.OpenAsync(cut, "Plan");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
 
         await RunPalette(cut, "/settings");
         Assert.Single(cut.FindAll(".settings-panel"));
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
     }
 
@@ -1080,9 +1080,9 @@ public sealed class MainTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
         int requests = data.Http.Requests;
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".settings-panel").TextContent, StringComparison.Ordinal), Wait);
-        await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".settings-panel button.close");
 
         Assert.Equal(before, FileSnapshot.Take(data.Root));
         Assert.Equal(requests, data.Http.Requests);
@@ -1116,7 +1116,7 @@ public sealed class MainTests : IDisposable
             IElement button = cut.Find(".page-menu button.export");
             Assert.Equal("Export", button.TextContent);
             Assert.Equal("button", button.GetAttribute("type"));
-            await button.ClickAsync(new MouseEventArgs());
+            await StaleClick.FireAsync(cut, () => cut.Find(".page-menu button.export"), e => e.ClickAsync(new MouseEventArgs()));
         }
 
         Assert.Equal(1, data.Dialog.ExportSaves);
@@ -1240,7 +1240,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Replace Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.Equal("old\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Assert.Equal("new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         cut.WaitForAssertion(() => Assert.StartsWith(
@@ -1422,14 +1422,15 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Archive", "# Archive\n");
     }
 
-    // Waits until the element the selector finds (read in the render that created it) was given the focus.
-    private void AssertFocused(IRenderedComponent<Main> cut, string selector)
+    // Waits until the element held in the ElementReference field of TComponent was given the focus (the id comes from
+    // the field, not the markup, which a later render leaves without it; job 491).
+    private void AssertFocused<TComponent>(IRenderedComponent<Main> cut, string field)
+        where TComponent : IComponent
     {
-        string? id = cut.Find(selector).GetAttribute("blazor:elementReference");
-        Assert.False(string.IsNullOrEmpty(id));
+        string id = ElementRefs.Id<TComponent, Main>(cut, field);
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
                 i => i.Arguments[0] is ElementReference r && r.Id == id),
             Wait);
     }
@@ -1472,7 +1473,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(nav, cut.Find(".note-area").FirstElementChild);
         Assert.Empty(cut.FindAll(".note-toolbar"));
 
-        await cut.Find("nav.breadcrumb button.crumb[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.breadcrumb button.crumb[title='Meetings/Meeting 1']");
 
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
     }
@@ -1495,7 +1496,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["Meetings", "Meeting 1"], nav.QuerySelectorAll("button.crumb").Select(c => c.TextContent).ToArray());
         Assert.Equal("Notes", nav.QuerySelector("[aria-current=page]")!.TextContent);
 
-        await cut.Find("nav.breadcrumb button.crumb[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.breadcrumb button.crumb[title='Meetings/Meeting 1']");
 
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("Meetings/Meeting 1", cut.Find(".note-title").GetAttribute("title"));
@@ -1511,10 +1512,10 @@ public sealed class MainTests : IDisposable
         await OpenFull(cut, js, "Meetings/Meeting 1");
         js.EditUnsavable("# Meeting 1\n\nUnsaved\n");
 
-        await cut.Find("nav.breadcrumb button.crumb").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.breadcrumb button.crumb");
 
         Assert.Equal("Discard changes to Meetings/Meeting 1?", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Meetings", cut.Find(".note-title").TextContent), Wait);
     }
 
@@ -1633,7 +1634,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Projects");
 
-        await cut.Find("nav.subpages button.subpage-link[title='Projects/Beta']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.subpages button.subpage-link[title='Projects/Beta']");
 
         cut.WaitForAssertion(() => Assert.Equal("Beta", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("Projects/Beta", cut.Find(".note-title").GetAttribute("title"));
@@ -1651,11 +1652,11 @@ public sealed class MainTests : IDisposable
         await OpenFull(cut, js, "Projects");
         js.EditUnsavable("# Projects\n\nUnsaved\n");
 
-        await cut.Find("nav.subpages button.subpage-link[title='Projects/alpha']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.subpages button.subpage-link[title='Projects/alpha']");
 
         Assert.Equal("Discard changes to Projects?", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Projects", cut.Find(".note-title").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("alpha", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("alpha", cut.Find("nav.breadcrumb [aria-current=page]").TextContent);
     }
@@ -1799,20 +1800,20 @@ public sealed class MainTests : IDisposable
 
         await ChooseAsync(cut, "new-subpage");
         IElement field = cut.Find(".note-toolbar input.subpage-title");
-        AssertFocused(cut, "input.subpage-title");
+        AssertFocused<Main>(cut, "subpageField");
         Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
         Assert.Equal("Subpage title", field.GetAttribute("aria-label"));
         Assert.Equal("Subpage title", field.GetAttribute("placeholder"));
         Assert.Equal(string.Empty, field.GetAttribute("value"));
         Assert.Equal(["Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
-        await field.InputAsync(new ChangeEventArgs { Value = "Meeting 2" });
+        await StaleClick.FireAsync(cut, () => cut.Find(".note-toolbar input.subpage-title"), e => e.InputAsync(new ChangeEventArgs { Value = "Meeting 2" }));
         if (enter)
         {
-            await cut.Find(".subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".subpage-title", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find(".note-toolbar .subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".note-toolbar .subpage-title", new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Meeting 2\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Meeting 2.md")));
@@ -1835,9 +1836,9 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Meetings");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await ChooseAsync(cut, "new-subpage");
-        await cut.Find(".subpage-title").InputAsync(new ChangeEventArgs { Value = "meeting 1" });
+        await StaleClick.InputAsync(cut, ".subpage-title", new ChangeEventArgs { Value = "meeting 1" });
 
-        await cut.Find(".note-toolbar .subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .subpage-title", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Note Meetings/meeting 1 already exists.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -1845,11 +1846,11 @@ public sealed class MainTests : IDisposable
 
         if (esc)
         {
-            await cut.Find(".subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, ".subpage-title", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find(".note-toolbar button.cancel-subpage").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".note-toolbar button.cancel-subpage");
         }
 
         Assert.Empty(cut.FindAll(".subpage-title"));
@@ -1891,19 +1892,19 @@ public sealed class MainTests : IDisposable
 
         await ChooseAsync(cut, "move");
         IElement field = cut.Find(".note-toolbar input.move-parent");
-        AssertFocused(cut, "input.move-parent");
+        AssertFocused<Main>(cut, "moveField");
         Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
         Assert.Equal("New parent", field.GetAttribute("aria-label"));
         Assert.Equal("Meetings", field.GetAttribute("value"));
         Assert.Equal(["Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
-        await field.InputAsync(new ChangeEventArgs { Value = "archive" });
+        await StaleClick.FireAsync(cut, () => cut.Find(".note-toolbar input.move-parent"), e => e.InputAsync(new ChangeEventArgs { Value = "archive" }));
         if (enter)
         {
-            await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".move-parent", new KeyboardEventArgs { Key = "Enter" });
         }
         else
         {
-            await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+            await StaleClick.KeyDownAsync(cut, ".note-toolbar .move-parent", new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Meeting 1\n", File.ReadAllText(Path.Combine(data.Root, "Archive", "Meeting 1.md")));
@@ -1921,9 +1922,9 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
         await ChooseAsync(cut, "move");
-        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "" });
+        await StaleClick.InputAsync(cut, ".move-parent", new ChangeEventArgs { Value = "" });
 
-        await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .move-parent", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
         Assert.True(File.Exists(Path.Combine(data.Root, "Meeting 1.md")));
@@ -1944,19 +1945,19 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Archive");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await ChooseAsync(cut, "move");
-        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Nowhere" });
+        await StaleClick.InputAsync(cut, ".move-parent", new ChangeEventArgs { Value = "Nowhere" });
 
-        await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .move-parent", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("No note called Nowhere. Nothing was moved.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         if (esc)
         {
-            await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+            await StaleClick.KeyDownAsync(cut, ".move-parent", new KeyboardEventArgs { Key = "Escape" });
         }
         else
         {
-            await cut.Find(".note-toolbar button.cancel-move").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, ".note-toolbar button.cancel-move");
         }
 
         Assert.Empty(cut.FindAll(".move-parent"));
@@ -1975,8 +1976,8 @@ public sealed class MainTests : IDisposable
 
         await ChooseAsync(cut, "rename");
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".rename-title").GetAttribute("value")), Wait);
-        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Kickoff" });
-        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".rename-title", new ChangeEventArgs { Value = "Kickoff" });
+        await StaleClick.KeyDownAsync(cut, ".note-toolbar .rename-title", new KeyboardEventArgs { Key = "Enter" });
 
         Assert.True(File.Exists(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
         cut.WaitForAssertion(() => Assert.Equal("Kickoff", cut.Find(".note-title").TextContent), Wait);
@@ -2001,7 +2002,7 @@ public sealed class MainTests : IDisposable
         await ChooseAsync(cut, "delete");
 
         Assert.Equal(question, cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Meetings.md")));
         Assert.False(Directory.Exists(Path.Combine(data.Root, "Meetings")));
@@ -2052,7 +2053,7 @@ public sealed class MainTests : IDisposable
         await OpenFull(cut, js, "Meetings/Meeting 1");
 
         await ChooseAsync(cut, "share");
-        await cut.WaitForElement(".dialog button.confirm", Wait).ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.WaitForElement(".dialog button.confirm", Wait), e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal("Shared Meetings/Meeting 1 as HTML: " + data.Outside("m1.html"), cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("Meeting 1.html", data.Dialog.ShareSuggestedName);
@@ -2076,12 +2077,12 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(["2026-10-29 10:00:00"], cut.FindAll(".history-row button").Select(b => b.TextContent)), Wait);
         await OpenMenuAsync(cut);
         Assert.Equal("true", cut.Find(".page-menu button.history").GetAttribute("aria-checked"));
-        await cut.Find(".page-menu button.history").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu button.history");
         Assert.Empty(cut.FindAll(".history-panel"));
         Assert.Empty(cut.FindAll(".page-menu"));
         await OpenMenuAsync(cut);
         Assert.Equal("false", cut.Find(".page-menu button.history").GetAttribute("aria-checked"));
-        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu-backdrop");
 
         await ChooseAsync(cut, "history");
         await Open(cut, js, "Other");
@@ -2099,7 +2100,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         await ChooseFirstVersion(cut);
 
-        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.restore-version");
 
         Assert.Equal(
             "Restore Plan to the version from 2026-10-29 10:00:00? The current text is kept as a version.",
@@ -2108,7 +2109,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("now\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         int mounts = js.Calls("ContextEditor.mount").Count;
 
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Restored Plan to 2026-10-29 10:00:00.", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("accent", cut.Find(".main-status").GetAttribute("class"), StringComparison.Ordinal);
@@ -2131,12 +2132,12 @@ public sealed class MainTests : IDisposable
         await ChooseFirstVersion(cut);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.restore-version");
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
         js.EditUnsavable("typed\n");
-        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.restore-version");
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -2226,7 +2227,7 @@ public sealed class MainTests : IDisposable
 
         if (button == "restore")
         {
-            await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.restore-version");
         }
         else
         {
@@ -2359,14 +2360,14 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".main-status").TextContent);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(0, data.CloseCalls);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
 
         Assert.True(data.Guard.Closing());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog] button.confirm")), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         Assert.Equal(1, data.CloseCalls);
         Assert.Equal("# Plan\n\nElsewhere\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -2377,7 +2378,7 @@ public sealed class MainTests : IDisposable
     {
         await ChooseAsync(cut, "history");
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".history-row button")), Wait);
-        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".history-row button");
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("button.restore-version")), Wait);
     }
 
@@ -2416,14 +2417,14 @@ public sealed class MainTests : IDisposable
         Assert.Equal("false", item.GetAttribute("aria-checked"));
         string[] ids = cut.FindAll(".page-menu button").Select(b => b.ClassName ?? string.Empty).ToArray();
         Assert.Equal(Array.IndexOf(ids, "history") + 1, Array.IndexOf(ids, "pin"));
-        await item.ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.Find(".page-menu button.pin"), e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("ul.pinned-notes button.name[title='Plan']")), Wait);
         Assert.Equal(["Plan"], new PinnedNotesStore(data.Root).Read());
         Assert.Equal(["Plan"], data.State!.Pinned);
         await OpenMenuAsync(cut);
         Assert.Equal("true", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
-        await cut.Find(".page-menu button.pin").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu button.pin");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("ul.pinned-notes")), Wait);
         Assert.Empty(new PinnedNotesStore(data.Root).Read());
@@ -2445,7 +2446,7 @@ public sealed class MainTests : IDisposable
 
         await OpenMenuAsync(cut);
         Assert.Equal("false", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
-        await cut.Find(".page-menu button.pin").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu button.pin");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("ul.pinned-notes button.name[title='Secret']")), Wait);
         Assert.Equal("locked", cut.Find("ul.pinned-notes li.note .locked").TextContent);
@@ -2465,7 +2466,7 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll("button.pin"));
 
         await Open(cut, js, "Plan");
-        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.tags-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")), Wait);
 
         Assert.Empty(cut.FindAll("button.page-menu-open"));
@@ -2520,7 +2521,7 @@ public sealed class MainTests : IDisposable
     // 200: opens the top bar's More actions menu.
     internal static async Task OpenMenuAsync(IRenderedComponent<Main> cut)
     {
-        await cut.Find("button.page-menu-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.page-menu-open");
         Assert.Single(cut.FindAll(".page-menu[role=menu]"));
     }
 
@@ -2528,7 +2529,7 @@ public sealed class MainTests : IDisposable
     internal static async Task ChooseAsync(IRenderedComponent<Main> cut, string id)
     {
         await OpenMenuAsync(cut);
-        await cut.Find(".page-menu button." + id).ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu button." + id);
     }
 
     // 200: the ids of the menu's items; the menu is closed again afterwards.
@@ -2536,7 +2537,7 @@ public sealed class MainTests : IDisposable
     {
         await OpenMenuAsync(cut);
         string[] ids = cut.FindAll(".page-menu button").Select(b => b.ClassName ?? string.Empty).ToArray();
-        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu-backdrop");
         return ids;
     }
 
@@ -2631,7 +2632,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(focuses, js.Calls("ContextEditor.focus").Count);
 
         js.Edit(captured + "\nMore\n");
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(captured + "\nMore\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
@@ -2659,7 +2660,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         Assert.Empty(js.Calls("ContextEditor.destroy"));
 
-        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".note-editor", new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("# Plan\n\nUnsaved\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -2700,9 +2701,9 @@ public sealed class MainTests : IDisposable
     public async Task Palette_OffersCapture()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/capture" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/capture" });
 
         IElement row = cut.FindAll(".palette-row")[0];
         Assert.Equal("/capture <text>", row.QuerySelector(".usage")!.TextContent);
@@ -2762,7 +2763,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(
             () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         Assert.True(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
         Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
@@ -2841,7 +2842,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(
             () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.False(File.Exists(Path.Combine(data.Root, "briefings.md")));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Created briefings/2026-10-29", cut.Find(".main-status").TextContent), Wait);
         Assert.True(File.Exists(Path.Combine(data.Root, "briefings", "2026-10-29.md")));
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
@@ -2859,7 +2860,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/briefing");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog] button.cancel")), Wait);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
 
         Assert.False(File.Exists(Path.Combine(data.Root, "briefings.md")));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
@@ -2895,9 +2896,9 @@ public sealed class MainTests : IDisposable
     public async Task Palette_OffersBriefing()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "k", CtrlKey = true });
 
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/briefing" });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = "/briefing" });
 
         IElement row = cut.FindAll(".palette-row")[0];
         Assert.Equal("/briefing", row.QuerySelector(".usage")!.TextContent);
@@ -3015,7 +3016,7 @@ public sealed class MainTests : IDisposable
     {
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
 
         await data.Actions!.AutoOpenToday();
@@ -3061,9 +3062,9 @@ public sealed class MainTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = line });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     // 156 AC-10, AC-11: a mention opens the person page (creating people and the page), whose PersonPanel sits
@@ -3114,12 +3115,12 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
 
         await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
@@ -3183,13 +3184,13 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.False(File.Exists(Path.Combine(data.Root, "New topic.md")));
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.False(File.Exists(Path.Combine(data.Root, "New topic.md")));
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[New topic]]"));
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("New topic", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal("Created New topic", cut.Find(".main-status").TextContent), Wait);
@@ -3205,7 +3206,7 @@ public sealed class MainTests : IDisposable
         _ = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".todos-region button.mention").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".todos-region button.mention");
 
         cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
@@ -3256,11 +3257,11 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         js.EditUnsavable("x\n\nUnsaved\n");
 
-        await cut.Find(".todos-region button.mention").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".todos-region button.mention");
 
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
 
         cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
     }
@@ -3336,14 +3337,14 @@ public sealed class MainTests : IDisposable
             ["Anna"], cut.FindAll(".find-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("role:: bereichsleiter", cut.Find(".find-panel h2").TextContent);
 
-        await cut.Find(".find-panel .note-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".find-panel .note-button");
 
         cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".find-panel"));
 
         await RunPalette(cut, "/find role nobody");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".find-panel")), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".find-panel")), Wait);
     }
 
@@ -3389,7 +3390,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Search: budget", cut.Find(".search-panel h2").TextContent);
         Assert.Equal("Budget 2027", cut.Find(".search-panel .line").TextContent);
 
-        await cut.Find(".search-panel .note-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".search-panel .note-button");
 
         cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".search-panel"));
@@ -3397,7 +3398,7 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/search nobody");
         cut.WaitForAssertion(() => Assert.Equal(
             "No notes contain nobody.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel")), Wait);
     }
 
@@ -3418,7 +3419,7 @@ public sealed class MainTests : IDisposable
 
     // The element ids the focus went to, in order.
     private string[] FocusIds() =>
-        data.Bunit.JSInterop.Invocations
+        data.JsCalls()
             .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus" && i.Arguments[0] is ElementReference)
             .Select(i => ((ElementReference)i.Arguments[0]!).Id)
             .ToArray();
@@ -3426,10 +3427,10 @@ public sealed class MainTests : IDisposable
     // Top bar Search (job 218): opens the popover, types the text and presses Return.
     private static async Task TopBarSearch(IRenderedComponent<Main> cut, string text)
     {
-        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".top-bar button.search-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop input")), Wait);
-        await cut.Find(".search-pop input").InputAsync(new ChangeEventArgs { Value = text });
-        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-pop input", new ChangeEventArgs { Value = text });
+        await StaleClick.KeyDownAsync(cut, ".search-pop input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     // 207 AC-3, 218 AC-5: the top bar's Search with an empty field shows the panel with an empty, focused input and
@@ -3450,7 +3451,7 @@ public sealed class MainTests : IDisposable
         IElement status = cut.Find(".search-panel p[role=status]");
         Assert.Equal("Type text or a tag filter like #project and not #done.", status.TextContent);
         Assert.True(status.ClassList.Contains("grey"));
-        AssertFocused(cut, ".search-panel input.search-input");
+        AssertFocused<SearchPanel>(cut, "input");
     }
 
     // 218 AC-5: the top bar's Search with typed text shows its results; each search gives the focus to the panel's
@@ -3462,12 +3463,11 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Plan", "x\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
-        string? popField = cut.Find(".search-pop input").GetAttribute("blazor:elementReference");
-        Assert.False(string.IsNullOrEmpty(popField));
-        await cut.Find(".search-pop input").InputAsync(new ChangeEventArgs { Value = "budget" });
+        await StaleClick.ClickAsync(cut, ".top-bar button.search-open");
+        string popField = ElementRefs.Id<TopBar, Main>(cut, "searchField");
+        await StaleClick.InputAsync(cut, ".search-pop input", new ChangeEventArgs { Value = "budget" });
         int before = FocusIds().Length;
-        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".search-pop input", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Anna"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
@@ -3499,15 +3499,15 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
 
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "budget" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "budget" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Anna"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Search: budget", cut.Find(".search-panel h2").TextContent);
 
-        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "#work" });
-        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".search-input", new ChangeEventArgs { Value = "#work" });
+        await StaleClick.KeyDownAsync(cut, ".search-input", new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Search: #work", cut.Find(".search-panel h2").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel .line")), Wait);
@@ -3529,7 +3529,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Open job1234"], cut.FindAll("nav.saved-searches button.saved-search").Select(b => b.TextContent).ToArray()), Wait);
-        await cut.Find("nav.saved-searches button.saved-search").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.saved-searches button.saved-search");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent), Wait);
@@ -3544,7 +3544,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             ["Beta"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
 
-        await cut.Find("nav.saved-searches button.saved-search-remove").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "nav.saved-searches button.saved-search-remove");
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("nav.saved-searches")), Wait);
         Bar.WaitForAssertion(() => Assert.Equal(
@@ -3579,7 +3579,7 @@ public sealed class MainTests : IDisposable
             ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Decisions", cut.Find(".decisions-panel h2").TextContent);
 
-        await cut.FindAll(".decisions-panel .note-button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".decisions-panel .note-button")[1], e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".decisions-panel"));
@@ -3588,7 +3588,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             ["2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Decisions: #work", cut.Find(".decisions-panel h2").TextContent);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
@@ -3603,21 +3603,21 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.decisions-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.decisions-open");
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Decisions", cut.Find(".decisions-panel h2").TextContent);
 
-        await cut.FindAll(".decisions-panel .note-button")[1].ClickAsync(new MouseEventArgs());
+        await StaleClick.FireAsync(cut, () => cut.FindAll(".decisions-panel .note-button")[1], e => e.ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
 
-        await cut.Find("button.decisions-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.decisions-open");
         cut.WaitForAssertion(() => Assert.Equal(
             ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
-        await cut.Find(".decisions-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".decisions-panel button.close");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
@@ -3636,7 +3636,7 @@ public sealed class MainTests : IDisposable
             ["2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Decisions: #work", cut.Find(".decisions-panel h2").TextContent);
 
-        await cut.Find("button.decisions-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.decisions-open");
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
@@ -3656,7 +3656,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/decisions");
         cut.WaitForAssertion(() => Assert.Equal("Decision 7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
-        await cut.Find(".decisions-panel .decision-number button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".decisions-panel .decision-number button");
 
         cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(["ab12-7"], js.DecisionJumps()), Wait);
@@ -3665,7 +3665,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/decisions");
         cut.WaitForAssertion(() => Assert.Equal("Decision 7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
-        await cut.Find(".decisions-panel .decision-number button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".decisions-panel .decision-number button");
 
         cut.WaitForAssertion(() => Assert.Equal(["ab12-7", "ab12-7"], js.DecisionJumps()), Wait);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
@@ -3682,7 +3682,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             "Type /decisions [tag].", cut.Find(".decisions-panel p[role=status]").TextContent), Wait);
         Assert.True(cut.Find(".decisions-panel p[role=status]").ClassList.Contains("red"));
-        await cut.Find(".decisions-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".decisions-panel button.close");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
@@ -3726,7 +3726,7 @@ public sealed class MainTests : IDisposable
         Assert.False(cut.Find("p.decision-clash").ClassList.Contains("red"));
         Assert.True(Assert.Single(new TagIndex(data.Root).DecisionFolderAliases()).Warned);
 
-        await cut.Find("p.decision-clash button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "p.decision-clash button");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("p.decision-clash")), Wait);
 
         IRenderedComponent<Main> again = data.Bunit.Render<Main>();
@@ -3804,7 +3804,7 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll(".palette"));
         Assert.Empty(cut.FindAll(".main-status.red"));
 
-        await cut.Find(".review-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".review-panel button.close");
 
         Assert.Empty(cut.FindAll(".review-panel"));
     }
@@ -3829,7 +3829,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/review");
         Assert.Single(cut.FindAll(".review-panel"));
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".review-panel")), Wait);
     }
 
@@ -3844,7 +3844,7 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/review");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-note button")), Wait);
 
-        await cut.Find(".review-panel .review-note button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".review-panel .review-note button");
 
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
@@ -3865,11 +3865,11 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/review");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-note button")), Wait);
 
-        await cut.Find(".review-panel .review-note button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".review-panel .review-note button");
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
     }
 
@@ -3895,7 +3895,7 @@ public sealed class MainTests : IDisposable
     private static async Task TodayAndOpen(IRenderedComponent<Main> cut, EditorJs js)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
@@ -3957,28 +3957,28 @@ public sealed class MainTests : IDisposable
 
         // The appointment page saves a dirty editor first, so it is shown over the clean note.
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-appointments button.appointment-item")), Wait);
-        await cut.Find(".day-appointments button.appointment-item").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".day-appointments button.appointment-item");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page")), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".appointment-page")), Wait);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         js.EditUnsavable("# 2026-10-29\n\nUnsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
 
         await RunPalette(cut, "/tags");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".tags-panel")), Wait);
 
         await RunPalette(cut, "/triage");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel")), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".triage-panel")), Wait);
 
 
@@ -4019,10 +4019,10 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
@@ -4030,9 +4030,9 @@ public sealed class MainTests : IDisposable
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
@@ -4049,7 +4049,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         byte[] before = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
@@ -4068,7 +4068,7 @@ public sealed class MainTests : IDisposable
         string path = Path.Combine(data.Root, "2026-10-29.md");
         data.Actions!.BeforeWrite = () => Directory.CreateDirectory(path);
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
 
         cut.WaitForAssertion(
             () => Assert.Equal(DesktopActions.DailyNoteFailedText("2026-10-29"), cut.Find(".main-status").TextContent), Wait);
@@ -4079,7 +4079,7 @@ public sealed class MainTests : IDisposable
 
         await Open(cut, js, "Plan");
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(
             () => Assert.Equal("Can't write 2026-10-29. Nothing was done.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
@@ -4112,21 +4112,21 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         int mounts = js.Calls("ContextEditor.mount").Count;
 
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Single(cut.FindAll(".day-pick table[role=grid]"));
         Assert.Empty(cut.FindAll(".day-pick input"));
         Assert.Equal("true", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
-        await cut.Find("button.day-pick-open").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.KeyDownAsync(cut, "button.day-pick-open", new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
         Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        await cut.Find(".day-pick button.day[tabindex='0']").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
+        await StaleClick.KeyDownAsync(cut, ".day-pick button.day[tabindex='0']", new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
+        await StaleClick.ClickAsync(cut, ".day-pick-backdrop");
         Assert.Empty(cut.FindAll(".day-pick"));
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Empty(cut.FindAll(".day-pick"));
 
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
@@ -4139,16 +4139,16 @@ public sealed class MainTests : IDisposable
     {
         DateOnly day = DateOnly.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         string month = day.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         DateOnly shown = DateOnly.ParseExact(cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label") ?? string.Empty, "MMMM yyyy", CultureInfo.InvariantCulture);
         for (int i = 0; i < 2400 && shown.ToString("MMMM yyyy", CultureInfo.InvariantCulture) != month; i++)
         {
-            await cut.Find(shown < day ? ".day-pick button.day-pick-next" : ".day-pick button.day-pick-prev").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, shown < day ? ".day-pick button.day-pick-next" : ".day-pick button.day-pick-prev");
             shown = DateOnly.ParseExact(cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label") ?? string.Empty, "MMMM yyyy", CultureInfo.InvariantCulture);
         }
 
         string label = day.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture);
-        await cut.Find($".day-pick button.day:not(.outside)[aria-label='{label}']").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, $".day-pick button.day:not(.outside)[aria-label='{label}']");
     }
 
     // 212: picks value and waits until the day's note named name is in the editor, mounted and ready, with its links
@@ -4261,9 +4261,9 @@ public sealed class MainTests : IDisposable
         await TypeAndAutoSave(cut, js, "# 2026-10-29\n\nToday typed\n");
         Assert.Equal("# 2026-10-29\n\nToday typed\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
         Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
@@ -4300,9 +4300,9 @@ public sealed class MainTests : IDisposable
         IElement item = cut.Find(".page-menu button.end-day");
         Assert.Equal("End the day", item.TextContent);
         Assert.Equal("menuitem", item.GetAttribute("role"));
-        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".page-menu-backdrop");
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         Assert.Empty(cut.FindAll("button.page-menu-open"));
     }
@@ -4392,7 +4392,7 @@ public sealed class MainTests : IDisposable
         data.WriteSensitive("2026-10-29", "# secret day\n");
         data.Keys.AgreeThrows = true;
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
         Assert.Equal(["end-day", "standup", "rename", "delete", "history", "pin", "make-plain", "lock"], await MenuIdsAsync(cut));
@@ -4502,7 +4502,7 @@ public sealed class MainTests : IDisposable
         data.WriteSensitive("2026-10-29", "# secret day\n");
         data.Keys.AgreeThrows = true;
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.today-open");
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
         int agrees = data.Keys.Agrees;
@@ -4586,7 +4586,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.False(File.Exists(Path.Combine(data.Root, "2026-11-20.md")));
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
@@ -4596,7 +4596,7 @@ public sealed class MainTests : IDisposable
 
         await PickDate(cut, "2026-11-20");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Created 2026-11-20", cut.Find(".main-status").TextContent);
@@ -4668,39 +4668,39 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
         Assert.Empty(cut.FindAll(".day-pick button.day.selected"));
         Assert.Single(cut.FindAll(".day-pick button.day.today"));
         Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
-        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".day-pick-backdrop");
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
 
         await Open(cut, js, "Plan");
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Empty(cut.FindAll(".day-pick button.day.selected"));
         Assert.Single(cut.FindAll(".day-pick button.day.today"));
         Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
-        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".day-pick-backdrop");
 
         await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Equal("November 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
         Assert.Equal("Friday, 20 November 2026", cut.Find(".day-pick button.day.selected").GetAttribute("aria-label"));
         Assert.Equal("Friday, 20 November 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
         Assert.Contains("outside", cut.Find(".day-pick button.day.today").ClassList);
-        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".day-pick-backdrop");
 
         await TodayAndOpen(cut, js);
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
         Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day.today.selected").GetAttribute("aria-label"));
-        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".day-pick-backdrop");
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day.today.selected").GetAttribute("aria-label"));
-        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".day-pick-backdrop");
     }
 
     // 212 AC-7: Today then a note name, and Today then /today, end in an editor whose change auto save saves.
@@ -4796,7 +4796,7 @@ public sealed class MainTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
         Assert.Single(cut.FindAll(".capture-pop-backdrop"));
@@ -4807,8 +4807,8 @@ public sealed class MainTests : IDisposable
         Assert.Equal("true", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
         cut.WaitForAssertion(
             () => Assert.Contains(
-                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
-                i => i.Arguments[0] is ElementReference r && r.Id == input.GetAttribute("blazor:elementReference")),
+                data.JsCalls().Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                i => i.Arguments[0] is ElementReference r && r.Id == ElementRefs.Id<TopBar, Main>(cut, "captureField")),
             Wait);
     }
 
@@ -4818,21 +4818,21 @@ public sealed class MainTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
-        await cut.Find(".capture-pop input").InputAsync(new ChangeEventArgs { Value = "buy milk" });
-        await cut.Find(".capture-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await StaleClick.InputAsync(cut, ".capture-pop input", new ChangeEventArgs { Value = "buy milk" });
+        await StaleClick.KeyDownAsync(cut, ".capture-pop input", new KeyboardEventArgs { Key = "Escape" });
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
         Assert.Equal("false", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
 
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
-        await cut.Find(".capture-pop-backdrop").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".capture-pop-backdrop");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop-backdrop")), Wait);
 
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
 
         Assert.False(File.Exists(Path.Combine(data.Root, "inbox.md")));
@@ -4844,14 +4844,14 @@ public sealed class MainTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-pick")), Wait);
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
         Assert.Empty(cut.FindAll(".day-pick"));
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
 
-        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.day-pick-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-pick")), Wait);
         Assert.Empty(cut.FindAll(".capture-pop"));
         Assert.Empty(cut.FindAll(".capture-pop-backdrop"));
@@ -4862,12 +4862,12 @@ public sealed class MainTests : IDisposable
     {
         if (cut.FindAll(".capture-pop").Count == 0)
         {
-            await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, "button.capture-open");
             cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
         }
 
-        await cut.Find(".capture-pop input").InputAsync(new ChangeEventArgs { Value = text });
-        await cut.Find(".capture-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.InputAsync(cut, ".capture-pop input", new ChangeEventArgs { Value = text });
+        await StaleClick.KeyDownAsync(cut, ".capture-pop input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     // 199 AC-5: Return captures to a new inbox, says Captured., closes the popover and empties the field.
@@ -4883,7 +4883,7 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
         Assert.Equal("# inbox\n- 2026-10-29 10:05 buy milk\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
 
-        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.capture-open");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
         Assert.Equal(string.Empty, cut.Find(".capture-pop input").GetAttribute("value") ?? string.Empty);
     }
@@ -5059,7 +5059,7 @@ public sealed class MainTests : IDisposable
         Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index < item);
         Assert.True(item < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
 
-        await cut.Find(".item-panel .note-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".item-panel .note-button");
 
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".item-panel"));

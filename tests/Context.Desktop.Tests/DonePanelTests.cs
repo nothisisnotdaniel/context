@@ -17,9 +17,9 @@ public sealed class DonePanelTests : IDisposable
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "/donelog" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "/donelog" });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
         return cut;
     }
 
@@ -46,7 +46,7 @@ public sealed class DonePanelTests : IDisposable
         Assert.DoesNotContain("<b>", cut.Find(".done-panel").InnerHtml, StringComparison.Ordinal);
         Assert.All(cut.FindAll(".done-panel button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
-        await cut.Find(".done-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".done-panel button.close");
         Assert.Empty(cut.FindAll(".done-panel"));
     }
 

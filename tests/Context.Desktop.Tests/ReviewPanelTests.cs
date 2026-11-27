@@ -108,8 +108,8 @@ public sealed class ReviewPanelTests : IDisposable
         // 222: no reload may hold the renderer, and the buttons are found again, so each click is the current one.
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         await cut.InvokeAsync(() => { });
-        await cut.Find(".review-note button.note-button").ClickAsync(new MouseEventArgs());
-        await cut.Find(".panel-bar button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".review-note button.note-button");
+        await StaleClick.ClickAsync(cut, ".panel-bar button.close");
 
         Assert.Equal(["Plan"], opened);
         Assert.Equal(1, closed);
@@ -127,7 +127,7 @@ public sealed class ReviewPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-note")), Wait);
         await data.State!.Refresh().WaitAsync(Wait);
         await data.State.ReloadsSettled().WaitAsync(Wait);
-        await cut.Find("button.note-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.note-button");
 
         Assert.Equal(["Plan"], opened);
         Assert.Single(cut.FindAll(".review-note"));

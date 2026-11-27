@@ -41,7 +41,7 @@ public sealed class HistoryPanelTests : IDisposable
         IRenderedComponent<HistoryPanel> cut = Render("Plan");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".history-row button")), Wait);
 
-        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".history-row button");
 
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".diff-line")), Wait);
         Assert.Equal(
@@ -98,7 +98,7 @@ public sealed class HistoryPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".history-row button")), Wait);
         File.Delete(version);
 
-        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".history-row button");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read this version.", cut.Find(".version-unreadable").TextContent), Wait);
         Assert.Contains("red", cut.Find(".version-unreadable").GetAttribute("class"), StringComparison.Ordinal);
@@ -115,7 +115,7 @@ public sealed class HistoryPanelTests : IDisposable
         IRenderedComponent<HistoryPanel> cut = Render("Plan");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".history-row button")), Wait);
 
-        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".history-row button");
 
         cut.WaitForAssertion(() => Assert.Equal("Too many changes to show.", cut.Find(".too-different").TextContent), Wait);
         Assert.Contains("grey", cut.Find(".too-different").GetAttribute("class"), StringComparison.Ordinal);
@@ -134,11 +134,11 @@ public sealed class HistoryPanelTests : IDisposable
             .Add(h => h.Name, "Plan")
             .Add(h => h.OnRestore, v => asked = v));
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".history-row button")), Wait);
-        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".history-row button");
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("button.restore-version")), Wait);
 
         Assert.DoesNotContain(cut.FindAll(".diff-line"), l => l.TextContent.Contains('\u0007'));
-        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.restore-version");
 
         Assert.Equal((Id, new DateTime(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc)), asked);
     }

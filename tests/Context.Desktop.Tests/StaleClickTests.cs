@@ -1,6 +1,7 @@
 using AngleSharp.Dom;
 using Bunit;
 using Bunit.Rendering;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -49,6 +50,80 @@ public sealed class StaleClickTests : IDisposable
         Bar.WaitForAssertion(() => Assert.Equal("Theme: Light.", data.StatusBar.Text), Wait);
         Assert.Equal(AppTheme.Light, new SettingsStore(data.Root).ReadTheme());
         Assert.Contains("\"light\"", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
+        Assert.Equal(1, Volatile.Read(ref writes));
+    }
+
+    // 491: FireAsync takes a finder (a row of a FindAll, a helper's query) and asks it again while the event names a
+    // dropped handler, so the theme is still saved exactly once.
+    [Fact]
+    public async Task StaleElementFromAFinder_FiresOnce()
+    {
+        data.CreateState();
+        IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>();
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotEmpty(cut.FindAll("div.theme-choice"));
+            Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+        }, Wait);
+        int writes = 0;
+        data.Actions!.BeforeWrite = () => Interlocked.Increment(ref writes);
+        IElement stale = (IElement)cut.Find("button.theme-dark").Clone();
+        cut.Render();
+        int finds = 0;
+
+        await StaleClick.FireAsync(
+            cut,
+            () => Interlocked.Increment(ref finds) == 1 ? stale : cut.FindAll("button.theme-dark")[0],
+            e => e.ClickAsync(new MouseEventArgs()));
+
+        Bar.WaitForAssertion(() => Assert.Equal("Theme: Dark.", data.StatusBar.Text), Wait);
+        Assert.Equal(AppTheme.Dark, new SettingsStore(data.Root).ReadTheme());
+        Assert.Equal(2, Volatile.Read(ref finds));
+        Assert.Equal(1, Volatile.Read(ref writes));
+    }
+
+    // 491: an exception other than a dropped handler is not retried.
+    [Fact]
+    public async Task OtherFailure_IsNotRetried()
+    {
+        data.CreateState();
+        IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>();
+        int finds = 0;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => StaleClick.FireAsync(
+            cut,
+            () =>
+            {
+                Interlocked.Increment(ref finds);
+                return cut.Find("div");
+            },
+            _ => throw new InvalidOperationException("not a stale handler")));
+
+        Assert.Equal(1, Volatile.Read(ref finds));
+    }
+
+    // 491: Fire, for a test that does not await, finds the element again too and returns once the click was handled.
+    [Fact]
+    public void StaleElement_SyncFireClicksOnce()
+    {
+        data.CreateState();
+        IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>();
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotEmpty(cut.FindAll("div.theme-choice"));
+            Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+        }, Wait);
+        int writes = 0;
+        data.Actions!.BeforeWrite = () => Interlocked.Increment(ref writes);
+        IElement stale = (IElement)cut.Find("button.theme-dark").Clone();
+        cut.Render();
+        int finds = 0;
+
+        StaleClick.Fire(() => Interlocked.Increment(ref finds) == 1 ? stale : cut.Find("button.theme-dark"), e => e.ClickAsync(new MouseEventArgs()));
+
+        Bar.WaitForAssertion(() => Assert.Equal("Theme: Dark.", data.StatusBar.Text), Wait);
+        Assert.Equal(AppTheme.Dark, new SettingsStore(data.Root).ReadTheme());
+        Assert.Equal(2, Volatile.Read(ref finds));
         Assert.Equal(1, Volatile.Read(ref writes));
     }
 }

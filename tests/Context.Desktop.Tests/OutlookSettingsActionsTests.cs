@@ -189,7 +189,7 @@ public sealed class OutlookSettingsActionsTests : IDisposable
         Assert.Equal("Suggest todos from Outlook mail", cut.Find("label.mail-digest-line").TextContent.Trim());
         Assert.Equal("outlook-hint grey", box.ParentElement!.PreviousElementSibling!.ClassName);
 
-        await cut.Find("input.mail-digest-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
+        await StaleClick.ChangeAsync(cut, "input.mail-digest-enabled", new ChangeEventArgs { Value = true });
 
         Bar.WaitForAssertion(() =>
         {

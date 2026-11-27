@@ -1021,6 +1021,20 @@ Every factory agent reads this file before working on Context. Keep it short and
   (`RestoreLockedMode`), so a lock file that doesn't match fails CI and the release; locally restores update them.
   A package change has to commit the updated lock files (run `dotnet restore`). `PackageLockTests.cs` checks them.
 - **Test command:** `dotnet test`
+- **Hang timeout (job 491):** both test `.csproj` files set `VSTestBlameHang` `true`, `VSTestBlameHangTimeout` `60s`
+  and `VSTestBlameHangDumpType` `none`, so plain `dotnet test` (locally and in CI, `ci.yml` unchanged) aborts a run
+  in which a test runs 60 s and prints that test's name; no dump is written. Desktop tests and fakes never block a
+  thread without a bound: no `.Wait()`/`.WaitOne()` without a timeout, no one-argument `SpinWait.SpinUntil(`, no
+  `.GetAwaiter().GetResult()` without `.WaitAsync(` in its statement (`BoundedWait.Result(task, bound, what)`), no
+  `await` while a `Monitor` is held (`GateHold.Take(gate)` holds it on its own thread); a bound that runs out throws
+  a message naming what it waited for. Recorded JS calls are read on the renderer's dispatcher
+  (`DesktopFixture.JsCalls(identifier?)`, `EditorJs.Calls`), never by enumerating `JSInterop.Invocations` from the
+  test thread. Every event a test fires on an element it found goes through `StaleClick` (`ClickAsync`/`InputAsync`/...,
+  `FireAsync(cut, finder, fire)`, or the blocking `Fire(finder, fire)` instead of bUnit's synchronous `Click()`), which
+  finds the element again when a render dropped its handler; finding and firing inside `cut.InvokeAsync` needs none.
+  Element reference ids are read from the component's field (`ElementRefs.Id<TComponent, TRoot>(cut, path)`), never
+  from the markup's `blazor:elementReference`. `UnboundedWaitSourceTests` checks the waits, the events and the csproj
+  properties.
 - **CI:** `.github/workflows/ci.yml` (GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
   and on every pull request: `dotnet restore`, `dotnet build --no-restore -warnaserror`, `dotnet test --no-build`, at the repo root.
   Read-only token, no secrets, actions pinned to commit SHAs; `CiWorkflowTests.cs` checks the file as text.

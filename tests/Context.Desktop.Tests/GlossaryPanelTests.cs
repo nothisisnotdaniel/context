@@ -27,9 +27,9 @@ public sealed class GlossaryPanelTests : IDisposable
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string command)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = command });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await StaleClick.KeyDownAsync(cut, ".layout", new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await StaleClick.InputAsync(cut, ".palette-input", new ChangeEventArgs { Value = command });
+        await StaleClick.KeyDownAsync(cut, ".palette-input", new KeyboardEventArgs { Key = "Enter" });
     }
 
     private static void WaitLoaded(IRenderedComponent<Main> cut) =>
@@ -77,7 +77,7 @@ public sealed class GlossaryPanelTests : IDisposable
         Assert.DoesNotContain("<b>", section.InnerHtml, StringComparison.Ordinal);
         Assert.All(cut.FindAll(".glossary-panel button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
-        await cut.Find(".glossary-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".glossary-panel button.close");
         Assert.Empty(cut.FindAll(".glossary-panel"));
     }
 
@@ -90,7 +90,7 @@ public sealed class GlossaryPanelTests : IDisposable
         IRenderedComponent<Main> cut = await OpenGlossary();
         WaitLoaded(cut);
 
-        await cut.Find(".glossary-panel button.note-button").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".glossary-panel button.note-button");
 
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".glossary-panel"));
@@ -135,19 +135,15 @@ public sealed class GlossaryPanelTests : IDisposable
         data.WriteNote("Plan", "type:: person\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
-        object gate = DesktopFixture.IndexGate(data.State!);
 
-        Monitor.Enter(gate);
-        try
+        // The gate is held on a thread of its own: this test awaits while holding it (job 491: a Monitor entered here
+        // and left after the await could be left on another thread, which kept the gate held and hung the run).
+        using (GateHold.Take(DesktopFixture.IndexGate(data.State!)))
         {
             await RunPalette(cut, "/glossary");
             IElement loading = cut.Find(".glossary-panel p[role=status]");
             Assert.Equal("Loading…", loading.TextContent);
             Assert.True(loading.ClassList.Contains("grey"));
-        }
-        finally
-        {
-            Monitor.Exit(gate);
         }
 
         cut.WaitForAssertion(
@@ -184,10 +180,10 @@ public sealed class GlossaryPanelTests : IDisposable
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         int before = Reads(data.State!);
 
-        await cut.Find("input.glossary-filter").InputAsync(new ChangeEventArgs { Value = "seco" });
+        await StaleClick.InputAsync(cut, "input.glossary-filter", new ChangeEventArgs { Value = "seco" });
         Assert.Equal(["Zed"], Terms(cut));
 
-        await cut.Find("input.glossary-filter").InputAsync(new ChangeEventArgs { Value = "zz<b>" });
+        await StaleClick.InputAsync(cut, "input.glossary-filter", new ChangeEventArgs { Value = "zz<b>" });
         IElement status = cut.Find(".glossary-panel p[role=status]");
         Assert.Equal("No terms match \"zz<b>\".", status.TextContent);
         Assert.True(status.ClassList.Contains("grey"));

@@ -213,10 +213,13 @@ internal sealed class EditorJs
     /// <summary>
     /// The calls of <paramref name="identifier"/> so far, read on the renderer's dispatcher: a component's calls are
     /// recorded there, also those made after a load the page started by itself, so the list is never read mid-write.
+    /// The read waits at most <see cref="BoundedWait.Dispatcher"/> for the dispatcher (job 491).
     /// </summary>
     public IReadOnlyList<JSRuntimeInvocation> Calls(string identifier) =>
-        context.Renderer.Dispatcher.InvokeAsync(() => js.Invocations.Where(i => i.Identifier == identifier).ToList())
-            .GetAwaiter().GetResult();
+        BoundedWait.Result(
+            context.Renderer.Dispatcher.InvokeAsync(() => js.Invocations.Where(i => i.Identifier == identifier).ToList()),
+            BoundedWait.Dispatcher,
+            $"EditorJs.Calls(\"{identifier}\") on the renderer's dispatcher");
 
     /// <summary>The markdown passed to the latest mount.</summary>
     public string MountedText() => (string)Calls("ContextEditor.mount")[^1].Arguments[1]!;
