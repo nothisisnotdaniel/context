@@ -168,7 +168,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page → 487-person-note-todos.67b86604ce9643509d12bed49684c969
 - [x] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview → 488-todo-checkbox-decisions-button.5a0356d9890440c29c256f1650cdaf07
 - [x] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls → 489-middle-bar-sticky.001d9c2090bd4cb388735a46c69f941d
-- [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
+- [x] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars → 490-resizable-sidebars.8c566ce65db54dc2bc0011fe4e3162c6
 - [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
 - [stop] Auto stops here
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
