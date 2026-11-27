@@ -170,6 +170,16 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls → 489-middle-bar-sticky.001d9c2090bd4cb388735a46c69f941d
 - [x] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars → 490-resizable-sidebars.8c566ce65db54dc2bc0011fe4e3162c6
 - [x] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing → 492-wider-live-search.e2b34718d0884679b7c0cd70d48a6314
+- [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
+- [ ] [#526](backlog/526-skip-the-ci-tests-for-backlog.md) Skip the CI tests for backlog and lessons changes (after: factory#85)
+- [ ] [#238](backlog/238-stable-tests-and-locked-restore-on.md) Stable tests and locked restore on CI
+- [ ] [#334](backlog/334-fix-flaky-sensitiveflowtests-markandmakeplain-dirt.md) Fix flaky SensitiveFlowTests.MarkAndMakePlain_Dirty_AskToSaveFirst test
+- [ ] [#335](backlog/335-fix-flaky-open-anyroute-putsitfirst-once.md) Fix flaky Open_AnyRoute_PutsItFirst_Once test
+- [ ] [#353](backlog/353-fix-flaky-record-whileanotheractionisbusy-stilllis.md) Fix flaky Record_WhileAnotherActionIsBusy_StillListed test
+- [ ] [#22](backlog/022-concurrent-todo-writes.md) Concurrent todo writes
+- [ ] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
+- [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
+- [ ] [#229](backlog/229-note-tree-operation-fixes.md) Note tree operation fixes
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
 - [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
 - [ ] [#512](backlog/512-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
@@ -210,11 +220,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#96](backlog/096-excalidraw-drawings.md) Excalidraw drawings → 384-excalidraw-drawings
 - [?] [#97](backlog/097-azure-devops-status.md) Azure DevOps status
 - [x] [#236](backlog/236-import-refusals-and-safe-save.md) Import refusals and safe save → 385-import-refusals-safe-save
-- [ ] [#100](backlog/100-revisit-ac-8-texts-with-json.md) Revisit AC-8 texts with --json
 - [x] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
 - [ ] [#233](backlog/233-sensitive-notes-recovery-rules.md) Sensitive-notes recovery rules
 - [ ] [#129](backlog/129-pin-the-windows-certificate-by-thumbprint.md) Pin the Windows certificate by thumbprint
-- [ ] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
 - [h] [#464](backlog/464-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS
 - [h] [#465](backlog/465-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on Windows
 - [ ] [#228](backlog/228-tags-and-links-panel-fixes.md) Tags and links panel fixes
@@ -230,7 +238,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
 - [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
-- [ ] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
 - [ ] [#235](backlog/235-signing-hardening-and-windows-signing.md) Signing hardening and Windows signing
 - [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
@@ -241,34 +248,23 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#67](backlog/067-email-to-note.md) Email to note
 - [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
 - [ ] [#56](backlog/056-one-project-list.md) One project list
-- [ ] [#40](backlog/040-view-doc-tidy-ups.md) View doc tidy-ups
-- [ ] [#39](backlog/039-safe-tostring-on-all-records.md) Safe ToString on all records
 - [ ] [#34](backlog/034-clearer-calendar-display.md) Clearer calendar display
 - [ ] [#20](backlog/020-complete-checks-the-whole-todo.md) Complete checks the whole todo
-- [ ] [#22](backlog/022-concurrent-todo-writes.md) Concurrent todo writes
 - [ ] [#30](backlog/030-tag-help-and-input.md) Tag help and input
-- [ ] [#31](backlog/031-limit-current-rows.md) Limit /current rows
 - [ ] [#33](backlog/033-sturdier-calendar-parsing.md) Sturdier calendar parsing
-- [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
 - [ ] [#61](backlog/061-resurfacing.md) Resurfacing
 - [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
 - [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
-- [ ] [#229](backlog/229-note-tree-operation-fixes.md) Note tree operation fixes
-- [ ] [#238](backlog/238-stable-tests-and-locked-restore-on.md) Stable tests and locked restore on CI
 - [ ] [#230](backlog/230-clean-invisible-and-control-characters-in.md) Clean invisible and control characters in text
 - [x] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away (merged into #295)
 - [ ] [#237](backlog/237-code-spans-and-fences-in-tags.md) Code spans and fences in tags, links and mentions
-- [ ] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
 - [ ] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
 - [ ] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
 - [ ] [#227](backlog/227-template-and-daily-note-messages.md) Template and daily note messages
-- [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
 - [?] [#212](backlog/212-add-a-line-to-a-daily.md) Add a line to a daily note from the CLI
 - [ ] [#214](backlog/214-say-which-versions-the-history-diff.md) Say which versions the history diff compares
-- [?] [#215](backlog/215-cap-the-total-size-of-note.md) Cap the total size of note history
 - [ ] [#221](backlog/221-stop-a-hung-reminder-notification-process.md) Stop a hung reminder notification process
-- [?] [#222](backlog/222-give-the-todo-time-field-a.md) Give the todo time field a visible label
 - [ ] [#223](backlog/223-open-the-palette-with-ctrl-k.md) Open the palette with Ctrl+K from a triage text field
 - [ ] [#239](backlog/239-wider-text-column-in-the-decisions.md) Wider text column in the Decisions panel
 - [ ] [#240](backlog/240-cap-the-rows-read-for-the.md) Cap the rows read for the decision log
@@ -277,148 +273,64 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
 - [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
 - [ ] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
-- [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
-- [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
 - [x] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
-- [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
+- [ ] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 - [ ] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: work item numbers like #1234
-- [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
 - [ ] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
-- [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
-- [?] [#276](backlog/276-feedback-when-a-day-pick-is.md) Feedback when a day pick is ignored while busy
 - [ ] [#277](backlog/277-arrow-and-page-keys-in-the.md) Arrow and Page keys in the Pick a day calendar do not scroll the page
-- [?] [#280](backlog/280-keep-the-old-appointment-rows-dimmed.md) Keep the old appointment rows dimmed while stepping days
-- [?] [#281](backlog/281-one-reset-helper-for-the-pending.md) One reset helper for the pending state in Main.razor
-- [?] [#283](backlog/283-spacing-for-the-no-note-placeholder.md) Spacing for the no-note placeholder in the note area
-- [?] [#284](backlog/284-cap-the-length-of-each-text.md) Cap the length of each text field read from Outlook
-- [?] [#285](backlog/285-don-t-start-a-new-outlook.md) Don't start a new Outlook read while an earlier one hangs
-- [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
+- [ ] [#285](backlog/285-don-t-start-a-new-outlook.md) Don't start a new Outlook read while an earlier one hangs
+- [ ] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
 - [ ] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
 - [ ] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
-- [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
-- [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
 - [h] [#470](backlog/470-check-right-click-in-a-release.md) Check right click in a Release build on macOS
 - [h] [#471](backlog/471-check-right-click-in-a-release.md) Check right click in a Release build on Windows
-- [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
+- [ ] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
 - [ ] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
-- [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
-- [?] [#314](backlog/314-enter-adds-the-attribute-row-in.md) Enter adds the attribute row in the Attributes box
-- [?] [#315](backlog/315-keep-keyboard-focus-after-adding-or.md) Keep keyboard focus after adding or removing an attribute
 - [ ] [#316](backlog/316-add-attributes-to-a-note-that.md) Add attributes to a note that has none
-- [?] [#317](backlog/317-attribute-value-with-a-control-character.md) Attribute value with a control character isn't counted as changed
-- [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
-- [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
+- [ ] [#317](backlog/317-attribute-value-with-a-control-character.md) Attribute value with a control character isn't counted as changed
 - [x] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test → 246-flaky-palette-tests
-- [?] [#322](backlog/322-recent-notes-sidebar-keep-the-parent.md) Recent notes sidebar: keep the parent name visible on long titles
-- [?] [#323](backlog/323-tag-board-cache-note-reads-by.md) Tag board: cache note reads by note version
-- [?] [#324](backlog/324-tag-board-show-the-target-column.md) Tag board: show the target column name on the move buttons
-- [?] [#325](backlog/325-tag-board-hint-when-a-card.md) Tag board: hint when a card is dropped on No status
-- [?] [#326](backlog/326-tag-board-highlight-a-column-while.md) Tag board: highlight a column while a card is dragged over it
 - [ ] [#327](backlog/327-person-page-mark-overdue-waiting-for.md) Person page: mark overdue waiting-for follow-ups
-- [?] [#328](backlog/328-smart-paste-don-t-fetch-page.md) Smart paste: don't fetch page titles from local or private addresses
-- [?] [#329](backlog/329-smart-paste-limit-concurrent-page-title.md) Smart paste: limit concurrent page-title fetches
-- [?] [#330](backlog/330-smart-paste-say-why-a-page.md) Smart paste: say why a page title wasn't used
+- [ ] [#328](backlog/328-smart-paste-don-t-fetch-page.md) Smart paste: don't fetch page titles from local or private addresses
+- [ ] [#329](backlog/329-smart-paste-limit-concurrent-page-title.md) Smart paste: limit concurrent page-title fetches
 - [h] [#331](backlog/331-check-cmd-shift-v-plain-paste.md) Check Cmd+Shift+V plain paste in the macOS app
-- [?] [#332](backlog/332-carry-over-and-k-more-line.md) Carry-over: "… and k more" line is not an open point
+- [ ] [#332](backlog/332-carry-over-and-k-more-line.md) Carry-over: "… and k more" line is not an open point
 - [x] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test → 246-flaky-palette-tests
-- [ ] [#334](backlog/334-fix-flaky-sensitiveflowtests-markandmakeplain-dirt.md) Fix flaky SensitiveFlowTests.MarkAndMakePlain_Dirty_AskToSaveFirst test
-- [ ] [#335](backlog/335-fix-flaky-open-anyroute-putsitfirst-once.md) Fix flaky Open_AnyRoute_PutsItFirst_Once test
-- [?] [#336](backlog/336-cap-the-total-size-of-embedded.md) Cap the total size of embedded images in a shared note
-- [?] [#337](backlog/337-split-notehtml-cs-into-block-and.md) Split NoteHtml.cs into block and inline renderers
-- [?] [#338](backlog/338-fix-the-stale-comment-above-sharenotenow.md) Fix the stale comment above ShareNoteNow
+- [ ] [#336](backlog/336-cap-the-total-size-of-embedded.md) Cap the total size of embedded images in a shared note
 - [ ] [#339](backlog/339-share-a-note-as-pdf.md) Share a note as PDF
 - [ ] [#340](backlog/340-briefing-links-for-note-names-with.md) Briefing links for note names with brackets
-- [?] [#342](backlog/342-cap-the-screenshot-folder-watcher-s.md) Cap the screenshot folder watcher's seen set
 - [h] [#472](backlog/472-check-the-screenshot-capture-on-macos.md) Check the screenshot capture on macOS
 - [h] [#473](backlog/473-check-the-screenshot-capture-on-windows.md) Check the screenshot capture on Windows
-- [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
+- [ ] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
 - [ ] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
-- [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
-- [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
 - [h] [#474](backlog/474-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS
 - [h] [#475](backlog/475-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on Windows
-- [?] [#350](backlog/350-standup-catch-feed-and-calendar-errors.md) Standup: catch feed and calendar errors while composing
-- [?] [#351](backlog/351-standup-opens-today-s-note-before.md) /standup opens today's note before writing
-- [ ] [#353](backlog/353-fix-flaky-record-whileanotheractionisbusy-stilllis.md) Fix flaky Record_WhileAnotherActionIsBusy_StillListed test
-- [ ] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
-- [?] [#355](backlog/355-merge-notes-clearer-message-when-a.md) Merge notes: clearer message when a step after the save fails
-- [?] [#356](backlog/356-merge-notes-re-check-subpages-right.md) Merge notes: re-check subpages right before the delete
-- [?] [#357](backlog/357-similar-notes-limit-pairs-when-many.md) Similar notes: limit pairs when many notes share a title
-- [?] [#358](backlog/358-release-check-target-is-a-commit.md) Release: check TARGET is a commit sha in the version checks
-- [?] [#359](backlog/359-refuse-lookalike-spellings-of-the-removed.md) Refuse lookalike spellings of the removed secret options
-- [?] [#360](backlog/360-test-the-full-removed-option-sentence.md) Test the full removed-option sentence in CLAUDE.md
-- [?] [#361](backlog/361-tag-index-explicit-handling-of-a.md) Tag index: explicit handling of a symlinked context.db
-- [?] [#364](backlog/364-times-panel-narrow-the-catch-in.md) Times panel: narrow the catch in DesktopState.TimesNow
-- [?] [#365](backlog/365-pin-icon-contrast-on-the-open.md) Pin icon contrast on the open note row
-- [?] [#366](backlog/366-pinned-list-roll-back-the-in.md) Pinned list: roll back the in-memory change when the file write fails
-- [?] [#367](backlog/367-commit-log-turn-off-signature-checks.md) Commit log: turn off signature checks in git log
-- [?] [#368](backlog/368-desktop-request-folder-tighten-an-existing.md) Desktop request folder: tighten an existing .desktop folder and refuse a symlinked lock
-- [?] [#369](backlog/369-work-item-read-the-linked-repos.md) Work item: read the linked repos in parallel
-- [?] [#370](backlog/370-command-bar-show-a-running-line.md) Command bar: show a running line while a command runs
-- [?] [#371](backlog/371-command-bar-fit-the-window-to.md) Command bar: fit the window to its content and check the rounded corners
-- [?] [#375](backlog/375-code-block-copy-announce-the-result.md) Code block Copy: announce the result to screen readers
-- [?] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
+- [ ] [#350](backlog/350-standup-catch-feed-and-calendar-errors.md) Standup: catch feed and calendar errors while composing
+- [ ] [#351](backlog/351-standup-opens-today-s-note-before.md) /standup opens today's note before writing
+- [ ] [#356](backlog/356-merge-notes-re-check-subpages-right.md) Merge notes: re-check subpages right before the delete
+- [ ] [#357](backlog/357-similar-notes-limit-pairs-when-many.md) Similar notes: limit pairs when many notes share a title
+- [ ] [#366](backlog/366-pinned-list-roll-back-the-in.md) Pinned list: roll back the in-memory change when the file write fails
+- [ ] [#370](backlog/370-command-bar-show-a-running-line.md) Command bar: show a running line while a command runs
+- [ ] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
 - [ ] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
-- [?] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
-- [?] [#380](backlog/380-mail-digest-hint-under-the-settings.md) Mail digest: hint under the Settings checkbox
-- [?] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
-- [?] [#383](backlog/383-mail-digest-keep-read-mail-disabled.md) Mail digest: keep Read mail disabled while a timed-out read still runs
-- [?] [#386](backlog/386-meeting-todos-cap-and-clean-a.md) Meeting todos: cap and clean a stored meeting title on read
-- [?] [#387](backlog/387-meeting-todos-move-focus-to-the.md) Meeting todos: move focus to the meeting picker when Push finds no next meeting
-- [?] [#389](backlog/389-appointmentpaneltests-read-both-elements-of-an.md) AppointmentPanelTests: read both elements of an order check at the same moment
-- [?] [#390](backlog/390-sidebar-day-picker-fit-the-calendar.md) Sidebar day picker: fit the calendar in a narrow sidebar
+- [ ] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
+- [ ] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
+- [ ] [#383](backlog/383-mail-digest-keep-read-mail-disabled.md) Mail digest: keep Read mail disabled while a timed-out read still runs
 - [ ] [#391](backlog/391-editor-type-an-inline-code-span.md) Editor: type an inline code span that holds a backtick
-- [?] [#392](backlog/392-notes-clean-up-escapes-saved-by.md) Notes: clean up escapes saved by the old editor
-- [?] [#393](backlog/393-tests-find-the-rare-unnamed-debug.md) Tests: find the rare unnamed Debug failure in Context.Desktop.Tests
-- [?] [#394](backlog/394-search-index-skip-the-full-note.md) Search index: skip the full note_text repair pass when nothing needs it
-- [?] [#396](backlog/396-reproduce-the-recent-json-test-race.md) Reproduce the recent.json test race on a slow runner
-- [?] [#397](backlog/397-notestore-contains-match-unicode-normalised-paths.md) NoteStore.Contains: match Unicode-normalised paths
+- [ ] [#392](backlog/392-notes-clean-up-escapes-saved-by.md) Notes: clean up escapes saved by the old editor
+- [ ] [#393](backlog/393-tests-find-the-rare-unnamed-debug.md) Tests: find the rare unnamed Debug failure in Context.Desktop.Tests
+- [ ] [#396](backlog/396-reproduce-the-recent-json-test-race.md) Reproduce the recent.json test race on a slow runner
+- [ ] [#397](backlog/397-notestore-contains-match-unicode-normalised-paths.md) NoteStore.Contains: match Unicode-normalised paths
 - [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
 - [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
 - [ ] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
-- [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
 - [x] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
-- [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Group counts on the Todos page
-- [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
-- [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
-- [?] [#414](backlog/414-size-and-file-checks-in-the.md) Size and file checks in the dependency list test
-- [?] [#415](backlog/415-name-the-current-theme-when-a.md) Name the current theme when a theme save fails
-- [?] [#420](backlog/420-decision-picker-announces-the-selected-row.md) Decision picker announces the selected row to screen readers
-- [?] [#421](backlog/421-boundedfile-read-refuses-symlinks-and-fifos.md) BoundedFile.Read refuses symlinks
-- [?] [#422](backlog/422-byte-exact-history-checks-in-endday.md) Byte-exact history checks in EndDay and Merge decision tests
-- [?] [#423](backlog/423-tell-the-user-when-a-rename.md) Tell the user when a rename cannot update the title line
-- [?] [#424](backlog/424-refuse-web-links-with-invisible-unicode.md) Refuse web links with invisible Unicode format characters
-- [?] [#425](backlog/425-drop-attach-and-other-risky-query.md) Drop attach and other risky query parts from mailto links
-- [?] [#426](backlog/426-show-the-punycode-host-in-a.md) Show the punycode host in a web link title
-- [?] [#427](backlog/427-hint-cmd-or-ctrl-click-in.md) Hint Cmd or Ctrl click in the web link title
-- [?] [#428](backlog/428-keep-unrelated-status-messages-when-a.md) Keep unrelated status messages when a web link opens
-- [?] [#429](backlog/429-keep-reference-style-links-byte-for.md) Keep reference-style links byte for byte on save
-- [?] [#430](backlog/430-warn-when-the-todo-archive-nears.md) Warn when the todo archive nears its 20 MB cap
-- [?] [#431](backlog/431-scroll-the-selected-quick-switcher-row.md) Scroll the selected quick switcher row into view
-- [?] [#432](backlog/432-share-the-quick-switcher-and-palette.md) Share the quick switcher and palette CSS
-- [?] [#434](backlog/434-share-one-class-for-the-suite.md) Share one class for the Suite Pro entry-row buttons
-- [?] [#435](backlog/435-clear-the-typed-licence-key-after.md) Clear the typed licence key after a refused or failed activation
-- [?] [#436](backlog/436-don-t-follow-a-suitepro-symlink.md) Don't follow a SuitePro symlink when tightening the activation folder
-- [?] [#437](backlog/437-strict-utf-8-decoding-of-the.md) Strict UTF-8 decoding of the Keychain licence entry
-- [?] [#439](backlog/439-shared-async-wait-helper-for-desktop.md) Shared async wait helper for desktop tests
+- [ ] [#423](backlog/423-tell-the-user-when-a-rename.md) Tell the user when a rename cannot update the title line
+- [ ] [#424](backlog/424-refuse-web-links-with-invisible-unicode.md) Refuse web links with invisible Unicode format characters
+- [ ] [#425](backlog/425-drop-attach-and-other-risky-query.md) Drop attach and other risky query parts from mailto links
+- [ ] [#426](backlog/426-show-the-punycode-host-in-a.md) Show the punycode host in a web link title
+- [ ] [#429](backlog/429-keep-reference-style-links-byte-for.md) Keep reference-style links byte for byte on save
+- [ ] [#431](backlog/431-scroll-the-selected-quick-switcher-row.md) Scroll the selected quick switcher row into view
 - [?] [#440](backlog/440-let-n-work-item-searches-be.md) Let #<n> work-item searches be saved
-- [?] [#441](backlog/441-show-an-error-for-a-date.md) Show an error for a date the search range can't read
-- [?] [#442](backlog/442-cap-how-many-times-day-files.md) Cap how many Times day files one search reads
-- [?] [#443](backlog/443-test-that-a-note-without-a.md) Test that a note without a modified date is left out of a date range
-- [?] [#444](backlog/444-let-the-gap-space-the-open.md) Let the gap space the (open) label in search results
-- [?] [#445](backlog/445-say-when-the-date-range-doesn.md) Say when the date range doesn't apply to a tag filter
-- [?] [#446](backlog/446-keyboard-readable-glossary-hover.md) Keyboard-readable glossary hover
-- [?] [#447](backlog/447-incremental-glossary-decorations.md) Incremental glossary decorations
-- [?] [#448](backlog/448-keep-good-glossary-entries-when-one.md) Keep good glossary entries when one is bad
-- [?] [#449](backlog/449-check-glossary-underline-contrast-in-dark.md) Check glossary underline contrast in dark mode
-- [?] [#450](backlog/450-remove-unreachable-glossary-toolong-message.md) Remove unreachable glossary TooLong message
-- [?] [#451](backlog/451-pass-the-meeting-booking-name-to.md) Pass the meeting booking name to Times as one argument
-- [?] [#452](backlog/452-say-when-a-meeting-booking-loses.md) Say when a meeting booking loses its quicklist project
-- [?] [#455](backlog/455-strip-leading-unicode-dashes-and-non.md) Strip leading Unicode dashes and non-breaking spaces from Times booking names
-- [?] [#457](backlog/457-clear-a-stale-times-result-line.md) Clear a stale Times result line when the booking form is cancelled
-- [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
-- [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
-- [?] [#460](backlog/460-refuse-case-only-clashes-on-case.md) Refuse case-only clashes on case-sensitive file systems in import save
 - [ ] [#477](backlog/477-calendar-markers-for-notes-and-appointments.md) Calendar markers for notes and appointments (after: #476)
 - [ ] [#478](backlog/478-focus-mode-for-writing.md) Focus mode for writing
 - [ ] [#479](backlog/479-active-status-and-priority-for-todos.md) Active status and priority for todos
@@ -441,21 +353,11 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#500](backlog/500-refuse-a-fifo-or-device-node.md) Refuse a FIFO or device node as a log file
 - [ ] [#501](backlog/501-plain-wording-for-a-failed-update.md) Plain wording for a failed update check
 - [ ] [#502](backlog/502-hide-the-home-folder-in-the.md) Hide the home folder in the update log only at a path boundary
-- [?] [#519](backlog/519-check-code-block-wrapping-in-the.md) Check code block wrapping in the desktop app
 - [ ] [#521](backlog/521-caret-move-entry-in-the-editor.md) Caret-move entry in the editor test hook
 - [ ] [#522](backlog/522-drag-cursor-and-drop-indicator-for.md) Drag cursor and drop indicator for pinned notes
-- [?] [#524](backlog/524-clear-old-status-bar-messages.md) Clear old status bar messages (after: #506)
-- [?] [#525](backlog/525-make-timing-and-jint-bundle-tests.md) Make timing and Jint bundle tests reliable under load
-- [ ] [#526](backlog/526-skip-the-ci-tests-for-backlog.md) Skip the CI tests for backlog and lessons changes (after: factory#85)
+- [ ] [#525](backlog/525-make-timing-and-jint-bundle-tests.md) Make timing and Jint bundle tests reliable under load
 - [ ] [#527](backlog/527-changelog-note-per-version-shown-on.md) Changelog note per version, shown on first start
-- [?] [#528](backlog/528-cap-the-length-of-the-outlook.md) Cap the length of the Outlook attendee list
-- [?] [#529](backlog/529-find-the-one-off-desktop-test.md) Find the one-off Desktop test failure under parallel runs
-- [?] [#530](backlog/530-check-long-note-names-in-person.md) Check long note names in person-page note todos by eye
-- [?] [#531](backlog/531-test-the-case-only-note-name.md) Test the case-only note-name tie-break of person note todos
-- [?] [#532](backlog/532-test-control-characters-in-note-names.md) Test control characters in note names on the person page
-- [?] [#533](backlog/533-check-the-six-notes-bar-buttons.md) Check the six notes-bar buttons in the narrowest sidebar by eye
-- [?] [#534](backlog/534-check-the-sticky-note-bar-by.md) Check the sticky note bar by eye on macOS
-- [?] [#535](backlog/535-check-the-resizable-sidebars-by-eye.md) Check the resizable sidebars by eye on macOS
+- [ ] [#529](backlog/529-find-the-one-off-desktop-test.md) Find the one-off Desktop test failure under parallel runs
 
 ## Dropped with the terminal UI
 
