@@ -535,4 +535,101 @@ public sealed class PersonViewTests : IDisposable
         Assert.Equal(PersonViewKind.Mentions, view.Kind);
         Assert.Equal(["Ask @[Carl]"], view.DoneTodos.Select(t => t.Text));
     }
+
+    // 487 AC-1: an open note todo mentioning the person is listed with its indexed fields; one mentioning only someone
+    // else, a done note todo and a note-local checkbox are not.
+    [Fact]
+    public void Build_NoteTodos_OpenMentioningOnly()
+    {
+        WriteNote("Plan", "# Plan\n- { } call @[Anna] due:2026-11-03\n- { } ask @[Bob]\n- {x} sent @[Anna]\n- [ ] book @[Anna]");
+
+        PersonView view = Build("Anna");
+
+        NoteTodo todo = Assert.Single(view.NoteTodos);
+        Assert.Equal("Plan", todo.Note);
+        Assert.Equal(2, todo.Line);
+        Assert.Equal("call @[Anna]", todo.Text);
+        Assert.Equal(new DateOnly(2026, 11, 3), todo.Due);
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+    }
+
+    // 487 AC-2: a note todo's mention resolves through the aliases (any case and whitespace); an ambiguous alias
+    // shows on neither person.
+    [Fact]
+    public void Build_NoteTodos_ThroughAliases_AmbiguousOnNeither()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna");
+        WriteNote("Plan", "- { } call @[ anna ]\n- { } mail @[ANNA   schmidt]");
+
+        Assert.Equal(["call @[ anna ]", "mail @[ANNA schmidt]"], Build("Anna Schmidt").NoteTodos.Select(t => t.Text));
+
+        WriteNote("people/Anna Berg", "# Anna Berg\naliases:: anna");
+        WriteNote("Plan", "- { } call @[anna]");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), Now.AddHours(1));
+        File.SetLastWriteTimeUtc(Path.Combine(root, "people", "Anna Berg.md"), Now.AddHours(1));
+
+        Assert.Empty(Build("Anna Schmidt").NoteTodos);
+        Assert.Empty(Build("Anna Berg").NoteTodos);
+    }
+
+    // 487 AC-3: by due date (undated last), then note name ignoring case, then line. (The ordinal tie-break between
+    // names equal ignoring case can't be two files on a case-insensitive file system.)
+    [Fact]
+    public void Build_NoteTodos_Order()
+    {
+        WriteNote("b", "- { } b1 @[Anna]\n- { } b2 @[Anna] due:2026-11-02");
+        WriteNote("A", "- { } A1 @[Anna]\n- { } A2 @[Anna]");
+        WriteNote("C", "- { } C1 @[Anna] due:2026-11-01\n- { } C2 @[Anna] due:2026-11-02\n- { } C3 @[Anna]");
+
+        PersonView view = Build("Anna");
+
+        Assert.Equal(["C1 @[Anna]", "b2 @[Anna]", "C2 @[Anna]", "A1 @[Anna]", "A2 @[Anna]", "b1 @[Anna]", "C3 @[Anna]"],
+            view.NoteTodos.Select(t => t.Text));
+    }
+
+    // 487 AC-4: a ticked line is gone on the next build, and the build writes nothing but context.db.
+    [Fact]
+    public void Build_NoteTodos_TickedGone_OnlyContextDbWritten()
+    {
+        WriteNote("Plan", "- { } call @[Anna]");
+        Assert.Single(Build("Anna").NoteTodos);
+
+        WriteNote("Plan", "- {x} call @[Anna]");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), Now.AddHours(1));
+        SortedDictionary<string, string> before = FileSnapshot.Take(root, TagIndex.FileName);
+
+        PersonView view = Build("Anna");
+
+        Assert.Empty(view.NoteTodos);
+        Assert.Equal(before, FileSnapshot.Take(root, TagIndex.FileName));
+    }
+
+    // 487 AC-5: a note todo on the person's own page is listed (Notes still leaves the page out) and makes Kind Mentions.
+    [Fact]
+    public void Build_NoteTodos_OwnPage_Listed_KindMentions()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna", "# Anna\n- { } call @[Anna]");
+
+        PersonView view = Build("Anna");
+
+        Assert.Empty(view.Notes);
+        Assert.Equal("people/Anna", Assert.Single(view.NoteTodos).Note);
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+    }
+
+    // 487 AC-6: an unreadable context.db gives no note todos and does not throw.
+    [Fact]
+    public void Build_NoteTodos_BadDb_Empty()
+    {
+        WriteNote("Plan", "- { } call @[Anna]");
+        File.WriteAllText(DbPath, "this is not a database, just some text that fills the header....");
+
+        PersonView view = Build("Anna");
+
+        Assert.True(view.IndexUnreadable);
+        Assert.Empty(view.NoteTodos);
+        Assert.Equal(PersonViewKind.NoMentions, view.Kind);
+    }
 }

@@ -3214,6 +3214,37 @@ public sealed class MainTests : IDisposable
             ["Open todos"], cut.FindAll(".person-panel h2").Select(h => h.TextContent).ToArray()), Wait);
     }
 
+    // 487 AC-9: a mention in a person page's Todos in notes row opens that person's page through OpenMention.
+    [Fact]
+    public async Task NoteTodoMention_OnPersonPage_OpensOtherPerson()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n- { } ask @[Bob] about @[Anna]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "people/Anna");
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Find(".person-panel").TextContent, StringComparison.Ordinal);
+                Assert.Single(cut.FindAll(".person-panel ul.note-todos li"));
+            },
+            Wait);
+
+        await Click(cut, () => cut.FindAll(".person-panel ul.note-todos button.mention").Single(b => b.GetAttribute("title") == "@[Bob]"));
+
+        cut.WaitForAssertion(() => Assert.Equal("Bob", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("# Bob\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Bob.md")));
+        // Bob's own panel: unlike Anna's, it lists Anna's page under Mentioned in.
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.Equal(["people/Anna"], cut.FindAll(".person-panel .person-notes button").Select(b => b.TextContent).ToArray());
+                Assert.Equal(["people/Anna"], cut.FindAll(".person-panel ul.note-todos .todo-note").Select(b => b.TextContent).ToArray());
+            },
+            Wait);
+    }
+
     // 159 AC-8: with unsaved changes a todo mention asks to discard first, like an editor mention.
     [Fact]
     public async Task TodoMention_DirtyEditor_AsksFirst()

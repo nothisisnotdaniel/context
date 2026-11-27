@@ -180,7 +180,7 @@
                         }
                         @if (People.PersonOf(name) is { } person)
                         {
-                            <PersonPanel Person="@person" OnOpen="RequestOpen" />
+                            <PersonPanel Person="@person" OnOpen="RequestOpen" OnPerson="OpenMention" />
                         }
                         @if (WorkItems.ItemOf(name) is { } item)
                         {

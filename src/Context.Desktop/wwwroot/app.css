@@ -353,7 +353,8 @@ ol {
 
 /* A person mention in a todo's text, styled like the editor's mention chip: a long name is cut, the full text is in
    its title. */
-.todo .mention {
+.todo .mention,
+.person-panel .note-todo .mention {
     background: none;
     border: 1px dashed var(--line);
     border-radius: 10px;
@@ -369,14 +370,16 @@ ol {
     white-space: nowrap;
 }
 
-.todo .mention:focus-visible {
+.todo .mention:focus-visible,
+.person-panel .note-todo .mention:focus-visible {
     outline: 2px solid var(--accent-strong);
     outline-offset: 2px;
 }
 
 /* The note a todo inside a note comes from, after its text: a link-like button that opens the note; a long name is cut,
    the full name is in its title. */
-.todo .todo-note {
+.todo .todo-note,
+.person-panel .note-todo .todo-note {
     background: none;
     border: none;
     color: var(--grey);
@@ -394,6 +397,7 @@ ol {
 }
 
 .todo .todo-note:focus-visible,
+.person-panel .note-todo .todo-note:focus-visible,
 .all-todos-panel .todo .todo-meeting:focus-visible,
 .topic .topic-note:focus-visible,
 .to-review .review-note:focus-visible {

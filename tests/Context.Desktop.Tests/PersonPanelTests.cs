@@ -486,4 +486,124 @@ public sealed class PersonPanelTests : IDisposable
         Assert.Equal("Can't read the todo archive.", line.TextContent);
         Assert.True(line.ClassList.Contains("red"));
     }
+
+    // 487 AC-7: Todos in notes (date only when dated, text, note) after Open todos and before Done todos, no checkbox.
+    [Fact]
+    public async Task Render_NoteTodos_BetweenOpenAndDone()
+    {
+        WriteAnna();
+        data.WriteNote("Meet", "# Meet\n- { } plan @[Anna] with @[Bob]\n- { } call @[Anna] due:2026-11-02\n- { } only @[Bob]\n");
+        data.AddTodo("Ask @[Anna]", DesktopFixture.Today);
+        data.AddTodo("Thank @[Anna]", DesktopFixture.Today.AddDays(-4));
+        await data.RefreshAsync();
+        CompleteTodo("Thank @[Anna]", 22);
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna");
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+                Assert.Equal(
+                    ["Mentioned in", "Appointments", "Open todos", "Todos in notes", "Done todos"],
+                    cut.FindAll("h2").Select(h => h.TextContent).ToArray());
+            },
+            Wait);
+        Assert.Equal(["2026-11-02|call @[Anna]|Meet", "|plan @[Anna] with @[Bob]|Meet"], NoteTodoRows(cut));
+        Assert.Empty(cut.FindAll("ul.note-todos li:nth-child(2) .date"));
+        Assert.True(cut.Find("ul.note-todos li .date").ClassList.Contains("grey"));
+        Assert.Equal("Meet", cut.Find("ul.note-todos li .todo-note").GetAttribute("title"));
+        Assert.All(cut.FindAll("ul.note-todos li"), li => Assert.True(li.ClassList.Contains("person-todo")));
+        Assert.All(cut.FindAll("ul.note-todos button"), b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.True(cut.Find("ul.note-todos").ClassList.Contains("person-todos"));
+        Assert.Empty(cut.FindAll("input"));
+    }
+
+    // 487 AC-7: no matching note todo, no section.
+    [Fact]
+    public async Task Render_NoNoteTodos_NoSection()
+    {
+        WriteAnna();
+        data.WriteNote("Meet", "- { } only @[Bob]\n- {x} done @[Anna]\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna");
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+                Assert.Equal(["Mentioned in", "Appointments"], cut.FindAll("h2").Select(h => h.TextContent).ToArray());
+            },
+            Wait);
+        Assert.Empty(cut.FindAll("ul.note-todos"));
+    }
+
+    // 487 AC-8: the note button reports the full note name; a mention reports the normalized name, not OnOpen.
+    [Fact]
+    public async Task Click_NoteTodo_NoteOpens_MentionOpensPerson()
+    {
+        data.WriteNote("Plans", "# Plans\n");
+        data.WriteFile(Path.Combine("Plans", "Q4 meeting.md"), "- { } ask @[ Bob  Berg ] about @[Anna]\n");
+        await data.RefreshAsync();
+        List<string> opened = [];
+        List<string> people = [];
+
+        IRenderedComponent<PersonPanel> cut = data.Bunit.Render<PersonPanel>(p => p
+            .Add(c => c.Person, "Anna")
+            .Add(c => c.OnOpen, (string name) => opened.Add(name))
+            .Add(c => c.OnPerson, (string name) => people.Add(name)));
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+                Assert.Equal(["Mentioned in", "Todos in notes"], cut.FindAll("h2").Select(h => h.TextContent).ToArray());
+            },
+            Wait);
+        Assert.Equal(
+            ["@[ Bob Berg ]", "@[Anna]"],
+            cut.FindAll("ul.note-todos button.mention").Select(b => b.GetAttribute("title")!).ToArray());
+
+        await cut.Find("ul.note-todos button.mention").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Bob Berg"], people);
+        Assert.Empty(opened);
+
+        await cut.Find("ul.note-todos button.todo-note").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Plans/Q4 meeting"], opened);
+        Assert.Equal(["Bob Berg"], people);
+    }
+
+    // 487 AC-10: a person mentioned only by a note todo on their own page gets the row, not the grey line; the text
+    // goes through OneLine (no raw control characters) and is never markup.
+    [Fact]
+    public async Task Render_OwnPageNoteTodo_RowNotGreyLine_OneLine()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Carl.md"), "# Carl\n- { } call @[Carl] <b>soon</b>\u0007\tnow\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Carl");
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+                Assert.Equal(["Todos in notes"], cut.FindAll("h2").Select(h => h.TextContent).ToArray());
+            },
+            Wait);
+        Assert.Empty(cut.FindAll("p[role=status]"));
+        Assert.Equal(["|call @[Carl] <b>soon</b>\uFFFD now|people/Carl"], NoteTodoRows(cut));
+        Assert.Equal("call @[Carl] <b>soon</b>\uFFFD now", cut.Find("ul.note-todos .text").GetAttribute("title"));
+        Assert.Empty(cut.FindAll("b"));
+        Assert.DoesNotContain(cut.Find("ul.note-todos").TextContent, c => char.IsControl(c) && c != '\n' && c != ' ');
+    }
+
+    private static string[] NoteTodoRows(IRenderedComponent<PersonPanel> cut) =>
+        cut.FindAll("ul.note-todos li.note-todo")
+            .Select(r => (r.QuerySelector(".date")?.TextContent ?? string.Empty) + "|" + r.QuerySelector(".text")!.TextContent
+                + "|" + r.QuerySelector(".todo-note")!.TextContent)
+            .ToArray();
 }
