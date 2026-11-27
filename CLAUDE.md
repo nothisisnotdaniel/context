@@ -1724,7 +1724,20 @@ Every factory agent reads this file before working on Context. Keep it short and
     with a `.search-pop-backdrop`, styled like `.capture-pop`, with one `input[type=text]` `aria-label="Search"`,
     placeholder `Search notes`, maxlength 200, empty and focused on each opening; Return calls `OnSearch(text)` once
     (`Main.ShowSearch`, empty text too) and closes, so the panel's input takes the focus; Esc closes and focuses
-    `button.search-open`), `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
+    `button.search-open`; job 492: the input is 560px wide (`max-width: calc(100vw - 48px)`), and each `input` event
+    restarts an injected `ISearchPause` (`SearchPause.cs`, 250 ms `Task.Delay`; tests use `FakeSearchPause`, registered
+    in `DesktopFixture` and the `TopBarTests` constructor); when it elapses with a trimmed text of 3..200 characters that
+    is no tag filter or work item query, `OnLiveSearch` (a public `LiveSearch` wrapper, since `SearchView` is internal;
+    `Main` passes `State.Search`) runs once and the result shows under the input: grey `p.search-pop-count`
+    (`role=status`, full count), `ul.search-pop-hits` (`aria-label="Search results"`, at most `TopBar.MaxLiveHits` 8
+    rows, each a `button` with `span.name` (`NoteName`, also `title`) and grey `span.line` from `SearchPanel.SnippetOf`
+    with `<mark>`), then grey `Press Return to see all <n>.` over 8; grey `No notes contain <text>.` or red `Can't read
+    the search index.` instead; no Times hits. Other text removes the list; a result overtaken by a newer pause or a
+    close is dropped, and the previous list stays while the next call runs. A row (click, or ArrowDown from the input,
+    arrows stopping at the last row, ArrowUp from the first back to the input, Enter) calls `OnOpenHit((note, query))`
+    (`Main.OpenFromSearch`, so `Back to search` shows) and closes; Esc on a row closes and focuses
+    `button.search-open`; closing or Return cancels the pending pause; with no `OnLiveSearch` no pause starts),
+    `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
     `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
     `.capture-pop-backdrop`), and `button.day-pick-open` (`Pick a day`; job 213: a `.day-pick` month calendar with a
     `.day-pick-backdrop` and no input: header `button.day-pick-prev`/`day-pick-next` (icon-only, `Previous month`/`Next

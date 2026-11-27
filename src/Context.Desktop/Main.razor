@@ -41,7 +41,7 @@
                      @onpointerdown="e => StartResize(SidebarSide.Left, e)" @onkeydown="e => ResizerKey(SidebarSide.Left, e)"></div>
             }
             <main class="current-region">
-                <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
+                <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" OnLiveSearch="liveSearch" OnOpenHit="OpenFromSearch" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (State.DecisionNumbersRanOut)
                 {
@@ -337,6 +337,8 @@ else
 
     // While set, the open note came from the Search page with this query: Back to search shows it again (job 285).
     private (string Note, string Text)? searchBack;
+    // Job 492: the top bar's Search popover searches as you type through the same full-text search as the Search page.
+    private LiveSearch? liveSearch;
 
     // A search result whose opening waits for the unsaved-changes dialog.
     private (string Note, string Text)? pendingSearchBack;
@@ -464,6 +466,7 @@ else
             () => editor?.HasUnsaved ?? false,
             SaveFirstForCloseAsync,
             () => InvokeAsync(AskDiscardForClose));
+        liveSearch = new LiveSearch(text => State.Search(text));
         barRunner = RunFromBar;
         CommandBar.Register(barRunner);
         TakeStartNote();

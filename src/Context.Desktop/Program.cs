@@ -217,6 +217,8 @@ internal static class Program
         builder.Services.AddSingleton(new StatusBar());
         builder.Services.AddTransient<EditorInterop>();
         builder.Services.AddSingleton<IAutoSavePause>(new AutoSavePause());
+        // Job 492: the pause before the top bar's Search popover searches as you type.
+        builder.Services.AddSingleton<ISearchPause>(new SearchPause());
         // Filled in once the window exists; the guard only calls it after a save-first finished.
         PhotinoWindow? window = null;
         CloseGuard closeGuard = new CloseGuard(() => window?.Invoke(() => window.Close()));

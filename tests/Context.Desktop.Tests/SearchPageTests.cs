@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Components.Web;
 namespace Context.Tests;
 
 // 285 AC-2, AC-6 to AC-8: the Search page in place of the note area, and Back to search above a note opened from it.
+// 492 AC-7, AC-8: a live result of the top bar's Search popover opens a note the same way.
 public sealed class SearchPageTests : IDisposable
 {
     // Opening a note and the search run on Task.Run; every wait passes this bounded timeout.
@@ -298,6 +299,52 @@ public sealed class SearchPageTests : IDisposable
         Assert.Equal("Plan", cut.Find(".note-title").GetAttribute("title"));
         Assert.Empty(cut.FindAll("button.search-back"));
     }
+
+    // 492 AC-7: a live result in the top bar's popover opens the note through OpenFromSearch, with Back to search.
+    [Theory]
+    [InlineData("click")]
+    [InlineData("enter")]
+    public async Task LiveResult_OpensNote_WithBackToSearch(string how)
+    {
+        WriteNotes();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await StaleClick.ClickAsync(cut, ".top-bar button.search-open");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop input")), Wait);
+        await StaleClick.InputAsync(cut, ".search-pop input", new ChangeEventArgs { Value = "budget" });
+        Assert.Equal(1, data.SearchPause.Pending);
+
+        data.SearchPause.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Anna", "Plan"],
+            cut.FindAll("ul.search-pop-hits button .name").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("2 notes found", cut.Find(".search-pop-count").TextContent);
+        Assert.Empty(cut.FindAll(".search-panel"));
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        if (how == "click")
+        {
+            await Click(cut, () => cut.FindAll("ul.search-pop-hits button")[1]);
+        }
+        else
+        {
+            await data.State!.ReloadsSettled().WaitAsync(Wait);
+            await StaleClick.KeyDownAsync(cut, ".search-pop input", new KeyboardEventArgs { Key = "ArrowDown" });
+            await StaleClick.FireAsync(cut, () => LiveRow(cut, 0), e => e.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" }));
+            await StaleClick.FireAsync(cut, () => LiveRow(cut, 1), e => e.KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
+        }
+
+        WaitForNote(cut, js, mounts, "Plan");
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Single(cut.FindAll(".note-area button.search-back"));
+
+        await Click(cut, () => cut.Find("button.search-back"));
+        WaitForHits(cut, 2);
+        Assert.Equal("Search: budget", cut.Find(".search-panel h2").TextContent);
+    }
+
+    private static IElement LiveRow(IRenderedComponent<Main> cut, int row) => cut.FindAll("ul.search-pop-hits button")[row];
 
     private void WriteNotes()
     {

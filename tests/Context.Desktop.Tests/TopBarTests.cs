@@ -1,15 +1,24 @@
+using System.Reflection;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Context.Tests;
 
-// 200: the top bar's More actions menu, and 213: its month calendar, rendered on their own (no files, no waits: every
-// handler here is synchronous; Today and Selected are fixed parameters, never the clock).
+// 200: the top bar's More actions menu, and 213: its month calendar, rendered on their own (no files; Today and
+// Selected are fixed parameters, never the clock). 492: the Search popover's live results, with FakeSearchPause and a
+// fake live search whose results the test completes; the only waits are for those results to render.
 public sealed class TopBarTests : IDisposable
 {
+    // The live search's pause continues on the thread pool before it renders; every wait passes this bounded timeout.
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private readonly BunitContext context = new();
+    private readonly FakeSearchPause pause = new();
+    private readonly FakeLiveSearch liveSearch = new();
+    private readonly List<(string Note, string Text)> openedHits = [];
     private readonly List<string> chosen = [];
     private readonly List<DateOnly> picked = [];
     private readonly List<string> searched = [];
@@ -17,6 +26,7 @@ public sealed class TopBarTests : IDisposable
     public TopBarTests()
     {
         context.JSInterop.Mode = JSRuntimeMode.Loose;
+        context.Services.AddSingleton<ISearchPause>(pause);
     }
 
     public void Dispose() => context.Dispose();
@@ -792,6 +802,370 @@ public sealed class TopBarTests : IDisposable
         Assert.Empty(cut.FindAll(".search-pop-backdrop"));
         Assert.Empty(searched);
         Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
+    }
+
+    private IRenderedComponent<TopBar> RenderLive(bool live = true) =>
+        context.Render<TopBar>(p =>
+        {
+            p.Add(c => c.OnSearch, EventCallback.Factory.Create<string>(this, text => searched.Add(text)));
+            p.Add(c => c.OnOpenHit, EventCallback.Factory.Create<(string Note, string Text)>(this, hit => openedHits.Add(hit)));
+            if (live)
+            {
+                p.Add(c => c.OnLiveSearch, liveSearch.Search);
+            }
+        });
+
+    private static void OpenSearch(IRenderedComponent<TopBar> cut) =>
+        StaleClick.Fire(() => cut.Find("button.search-open"), e => e.ClickAsync(new MouseEventArgs()));
+
+    private static void Type(IRenderedComponent<TopBar> cut, string text) =>
+        StaleClick.Fire(() => SearchField(cut), e => e.InputAsync(new ChangeEventArgs { Value = text }));
+
+    private static void RowKey(IRenderedComponent<TopBar> cut, int row, string key) =>
+        StaleClick.Fire(() => cut.FindAll("ul.search-pop-hits button")[row], e => e.KeyDownAsync(new KeyboardEventArgs { Key = key }));
+
+    private static SearchView Found(params string[] notes) =>
+        new SearchView(
+            SearchViewKind.Found,
+            "budget",
+            notes.Select(n => new SearchHit(n, 2, "The budget for " + n, 4, [], null)).ToList());
+
+    private static string[] LiveNames(IRenderedComponent<TopBar> cut) =>
+        cut.FindAll("ul.search-pop-hits button .name").Select(b => b.TextContent).ToArray();
+
+    // Types the text, lets the pause elapse and waits until the live search was called with it.
+    private async Task TypeAndSearch(IRenderedComponent<TopBar> cut, string text, int callsBefore)
+    {
+        Type(cut, text);
+        pause.Elapse();
+        await liveSearch.WaitForCalls(callsBefore + 1, Wait);
+    }
+
+    // "the popover lists exactly these notes".
+    private static void WaitForRows(IRenderedComponent<TopBar> cut, params string[] names) =>
+        cut.WaitForAssertion(() => Assert.Equal(names, LiveNames(cut)), Wait);
+
+    // 492 AC-1: the popover's input is 560px wide and still fits a narrow window.
+    [Fact]
+    public void AppCss_SearchPopInput_Is560Wide_WithMaxWidth()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        int at = css.IndexOf("\n.search-pop input {", StringComparison.Ordinal);
+        Assert.True(at >= 0);
+        string block = css[at..css.IndexOf('}', at)];
+        Assert.Contains("width: 560px;", block, StringComparison.Ordinal);
+        Assert.Contains("max-width: calc(100vw - 48px);", block, StringComparison.Ordinal);
+        Assert.Contains("\nul.search-pop-hits {", css, StringComparison.Ordinal);
+    }
+
+    // 492 AC-2: every input event cancels the pending pause and starts one; only the elapsed pause searches, once, with
+    // the current text.
+    [Fact]
+    public async Task Live_EachInputRestartsPause_OneCallWithCurrentText()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        Assert.Equal(0, pause.Started);
+
+        Type(cut, "b");
+        Type(cut, "bu");
+        Type(cut, "bud");
+
+        Assert.Equal(3, pause.Started);
+        Assert.Equal(1, pause.Pending);
+        Assert.Empty(liveSearch.Texts);
+
+        pause.Elapse();
+        await liveSearch.WaitForCalls(1, Wait);
+
+        Assert.Equal(["bud"], liveSearch.Texts);
+        Assert.Equal(0, pause.Pending);
+    }
+
+    // 492 AC-3: too short, too long, a tag filter or a work item query is not searched, and the shown list goes.
+    [Theory]
+    [InlineData("  ab  ")]
+    [InlineData("#work")]
+    [InlineData("#[my tag]")]
+    [InlineData("#123")]
+    [InlineData("long")]
+    public async Task Live_UnsearchableText_NoCall_ListRemoved(string text)
+    {
+        if (text == "long")
+        {
+            text = new string('x', SearchView.MaxQueryLength + 1);
+        }
+
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("Plan"));
+        WaitForRows(cut, "Plan");
+
+        Type(cut, text);
+        pause.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-pop p, ul.search-pop-hits")), Wait);
+        Assert.Equal(["budget"], liveSearch.Texts);
+    }
+
+    // 492 AC-4: a Found result lists at most 8 rows in its order, each a button with the name (title too) and the grey
+    // line with the match marked; the count line comes first, the overflow hint after the list.
+    [Fact]
+    public async Task Live_Found_NineHits_EightRows_CountAndOverflow()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        string[] names = ["A1", "B2", "C3", "D4", "E5", "F6", "G7", "H8", "I9"];
+        liveSearch.Complete(0, Found(names));
+
+        WaitForRows(cut, names[..TopBar.MaxLiveHits]);
+        IElement pop = cut.Find(".search-pop");
+        IElement list = pop.QuerySelector("ul.search-pop-hits")!;
+        Assert.Equal("Search results", list.GetAttribute("aria-label"));
+        IElement count = Assert.Single(cut.FindAll(".search-pop p.search-pop-count"));
+        Assert.Equal("9 notes found", count.TextContent);
+        Assert.Equal("status", count.GetAttribute("role"));
+        Assert.True(count.ClassList.Contains("grey"));
+        Assert.Same(list, count.NextElementSibling);
+        IElement more = list.NextElementSibling!;
+        Assert.Equal("Press Return to see all 9.", more.TextContent);
+        Assert.True(more.ClassList.Contains("grey"));
+
+        IElement row = cut.FindAll("ul.search-pop-hits li > button")[1];
+        Assert.Equal("button", row.GetAttribute("type"));
+        Assert.Equal("B2", row.GetAttribute("title"));
+        IElement line = row.QuerySelector("span.line")!;
+        Assert.True(line.ClassList.Contains("grey"));
+        Assert.Equal("The budget for B2", line.TextContent);
+        Assert.Equal("budget", line.QuerySelector("mark")!.TextContent);
+    }
+
+    // 492 AC-4: one hit says "1 note found" and has no overflow hint; outside text renders as text, never markup.
+    [Fact]
+    public async Task Live_Found_OneHit_SingularCount_NoOverflow_TextNotMarkup()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, new SearchView(
+            SearchViewKind.Found, "budget", [new SearchHit("<b>Plan</b>", 1, "<i>budget</i>", 3, [], null)]));
+
+        WaitForRows(cut, "<b>Plan</b>");
+        Assert.Equal("1 note found", cut.Find(".search-pop-count").TextContent);
+        Assert.Empty(cut.FindAll(".search-pop-more"));
+        Assert.Empty(cut.FindAll(".search-pop b, .search-pop i"));
+        Assert.Equal("budget", cut.Find("ul.search-pop-hits mark").TextContent);
+    }
+
+    // 492 AC-5: no matches and an unreadable index show their message and no list.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Live_NoMatchesOrUnreadable_MessageNoList(bool unreadable)
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "bud\nget", 0);
+        liveSearch.Complete(0, new SearchView(
+            unreadable ? SearchViewKind.IndexUnreadable : SearchViewKind.NoMatches, "bud\nget", []));
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop p")), Wait);
+        IElement message = cut.Find(".search-pop p");
+        Assert.Equal(unreadable ? "Can't read the search index." : "No notes contain bud get.", message.TextContent);
+        Assert.True(message.ClassList.Contains(unreadable ? "red" : "grey"));
+        Assert.Empty(cut.FindAll("ul.search-pop-hits"));
+    }
+
+    // 492 AC-6: a call overtaken by a later pause is never rendered, even when it finishes last; the previous list stays
+    // while the next call runs.
+    [Fact]
+    public async Task Live_StaleResult_Dropped_PreviousListStaysWhileNextRuns()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("First"));
+        WaitForRows(cut, "First");
+
+        await TypeAndSearch(cut, "budgets", 1);
+        Assert.Equal(["First"], LiveNames(cut));
+
+        Type(cut, "budgets 2027");
+        pause.Elapse();
+        await liveSearch.WaitForCalls(3, Wait);
+        liveSearch.Complete(2, Found("Third"));
+        WaitForRows(cut, "Third");
+
+        liveSearch.Complete(1, Found("Second"));
+        await cut.InvokeAsync(() => { });
+
+        Assert.Equal(["Third"], LiveNames(cut));
+        Assert.Equal(["budget", "budgets", "budgets 2027"], liveSearch.Texts);
+    }
+
+    // 492 AC-6, AC-9: a call still running when the popover closes is never rendered; reopening shows no list.
+    [Fact]
+    public async Task Live_ClosedBeforeResult_Dropped()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        OpenSearch(cut);
+
+        liveSearch.Complete(0, Found("Plan"));
+        await cut.InvokeAsync(() => { });
+        OpenSearch(cut);
+        await cut.InvokeAsync(() => { });
+
+        Assert.Empty(cut.FindAll(".search-pop p, ul.search-pop-hits"));
+        Assert.Equal(string.Empty, SearchField(cut).GetAttribute("value") ?? string.Empty);
+    }
+
+    // 492 AC-7: clicking a row hands the note and the shown query over once and closes the popover.
+    [Fact]
+    public async Task Live_ClickRow_OpensHitOnce_Closes()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("Anna", "Plan"));
+        WaitForRows(cut, "Anna", "Plan");
+
+        await StaleClick.FireAsync(cut, () => cut.FindAll("ul.search-pop-hits button")[1], e => e.ClickAsync(new MouseEventArgs()));
+
+        Assert.Equal([("Plan", "budget")], openedHits);
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Empty(searched);
+    }
+
+    // 492 AC-8: ArrowDown in the input focuses the first row; arrows move and stop at the last; ArrowUp on the first
+    // focuses the input; Enter on a row opens it once and closes.
+    [Fact]
+    public async Task Live_Keys_MoveThroughRows_EnterOpens()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("Anna", "Carl", "Plan"));
+        WaitForRows(cut, "Anna", "Carl", "Plan");
+
+        SearchKey(cut, "ArrowDown");
+        Assert.Equal(Ref(cut, "liveRows[0]"), LastFocusId());
+        RowKey(cut, 0, "ArrowDown");
+        Assert.Equal(Ref(cut, "liveRows[1]"), LastFocusId());
+        RowKey(cut, 1, "ArrowDown");
+        Assert.Equal(Ref(cut, "liveRows[2]"), LastFocusId());
+        RowKey(cut, 2, "ArrowDown");
+        Assert.Equal(Ref(cut, "liveRows[2]"), LastFocusId());
+        RowKey(cut, 2, "ArrowUp");
+        Assert.Equal(Ref(cut, "liveRows[1]"), LastFocusId());
+        RowKey(cut, 1, "ArrowUp");
+        RowKey(cut, 0, "ArrowUp");
+        Assert.Equal(Ref(cut, "searchField"), LastFocusId());
+        Assert.Empty(openedHits);
+
+        RowKey(cut, 1, "Enter");
+
+        Assert.Equal([("Carl", "budget")], openedHits);
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Empty(searched);
+    }
+
+    // 492 AC-8: Enter opens the row, and the click the browser sends right after it does nothing more.
+    [Fact]
+    public async Task Live_EnterThenClick_OpensOnce()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("Anna"));
+        WaitForRows(cut, "Anna");
+
+        RowKey(cut, 0, "Enter");
+
+        // The browser's click after Return reaches the row's old handler (a browser keeps it until it has the render
+        // that removed the row); bUnit drops it at once, so the handler is called directly, as that click would.
+        MethodInfo handler = typeof(TopBar).GetMethod("OpenLive", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await cut.InvokeAsync(() => (Task)handler.Invoke(cut.Instance, ["Anna"])!);
+
+        Assert.Equal([("Anna", "budget")], openedHits);
+        Assert.Empty(cut.FindAll(".search-pop"));
+    }
+
+    // 492 AC-8: Esc on a row closes the popover and focuses the Search icon.
+    [Fact]
+    public async Task Live_EscapeOnRow_ClosesAndFocusesSearchButton()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        string button = Ref(cut, "searchButton");
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("Anna"));
+        WaitForRows(cut, "Anna");
+
+        RowKey(cut, 0, "Escape");
+
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Equal(button, LastFocusId());
+        Assert.Empty(openedHits);
+    }
+
+    // 492 AC-8: Return in the input still hands the text over once and closes, and the pending pause is cancelled.
+    [Fact]
+    public void Live_Return_SearchesPage_CancelsPause()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        Type(cut, "budget");
+        Assert.Equal(1, pause.Pending);
+
+        SearchKey(cut, "Enter");
+
+        Assert.Equal(["budget"], searched);
+        Assert.Equal(0, pause.Pending);
+        Assert.Empty(cut.FindAll(".search-pop"));
+        pause.Elapse();
+        Assert.Empty(liveSearch.Texts);
+    }
+
+    // 492 AC-9: a pause pending at close never searches; reopening starts empty with no list, and a new search works.
+    [Fact]
+    public async Task Live_CloseCancelsPause_ReopenEmpty()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive();
+        OpenSearch(cut);
+        await TypeAndSearch(cut, "budget", 0);
+        liveSearch.Complete(0, Found("Plan"));
+        WaitForRows(cut, "Plan");
+        Type(cut, "budgets");
+        Assert.Equal(1, pause.Pending);
+
+        StaleClick.Fire(() => cut.Find(".search-pop-backdrop"), e => e.ClickAsync(new MouseEventArgs()));
+        Assert.Equal(0, pause.Pending);
+        pause.Elapse();
+        OpenSearch(cut);
+
+        Assert.Equal(string.Empty, SearchField(cut).GetAttribute("value") ?? string.Empty);
+        Assert.Empty(cut.FindAll(".search-pop p, ul.search-pop-hits"));
+
+        await TypeAndSearch(cut, "plans", 1);
+        Assert.Equal(["budget", "plans"], liveSearch.Texts);
+    }
+
+    // 492 AC-9: without OnLiveSearch the popover starts no pause and shows no list.
+    [Fact]
+    public void Live_NoLiveSearch_NoPause()
+    {
+        IRenderedComponent<TopBar> cut = RenderLive(live: false);
+        OpenSearch(cut);
+        Type(cut, "budget");
+
+        Assert.Equal(0, pause.Started);
+        SearchKey(cut, "Enter");
+        Assert.Equal(["budget"], searched);
     }
 
     private static string[] Open(IRenderedComponent<TopBar> cut)
