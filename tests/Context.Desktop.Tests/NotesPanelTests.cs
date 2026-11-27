@@ -103,8 +103,8 @@ public sealed class NotesPanelTests : IDisposable
     {
         IElement[] buttons = bar.QuerySelectorAll(".notes-bar-buttons button").ToArray();
         Assert.Equal(
-            ["triage-open", "people-open", "tags-open", "todos-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
-        Assert.Equal(["Triage", "People", "Tags", "Todos", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
+            ["triage-open", "people-open", "tags-open", "todos-open", "decisions-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
+        Assert.Equal(["Triage", "People", "Tags", "Todos", "Decisions", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
     }
 
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
@@ -113,6 +113,7 @@ public sealed class NotesPanelTests : IDisposable
     [InlineData("people-open", "People")]
     [InlineData("tags-open", "Tags")]
     [InlineData("todos-open", "Todos")]
+    [InlineData("decisions-open", "Decisions")]
     [InlineData("settings-open", "Settings")]
     public async Task BarButtons_AreIconOnly_WithSafeSvg(string cls, string label)
     {
@@ -134,13 +135,35 @@ public sealed class NotesPanelTests : IDisposable
         Assert.DoesNotContain("#", markup, StringComparison.Ordinal);
     }
 
-    // 331 AC-1: the Todos button's icon is an exclamation mark (a line and a dot), decorative and unfocusable.
+    // 488 AC-3: the Todos button's icon is a checkbox (a rounded square and a tick), decorative and unfocusable.
     [Fact]
-    public async Task TodosButton_ExclamationMarkIcon()
+    public async Task TodosButton_CheckboxIcon()
     {
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        IElement svg = cut.Find(".notes-bar-buttons button.todos-open svg");
+        IElement button = cut.Find(".notes-bar-buttons button.todos-open");
+        Assert.Equal("Todos", button.GetAttribute("aria-label"));
+        Assert.Equal("Todos", button.GetAttribute("title"));
+        IElement svg = Assert.Single(button.QuerySelectorAll("svg"));
+        Assert.Equal("false", svg.GetAttribute("focusable"));
+        Assert.Equal("currentColor", svg.GetAttribute("stroke"));
+        Assert.Equal("2", svg.GetAttribute("stroke-width"));
+        Assert.Equal("0 0 24 24", svg.GetAttribute("viewBox"));
+        Assert.Equal("18", svg.GetAttribute("width"));
+        Assert.Equal("18", svg.GetAttribute("height"));
+        Assert.Single(svg.QuerySelectorAll("rect"));
+        Assert.Equal(1, svg.QuerySelectorAll("polyline").Length + svg.QuerySelectorAll("path").Length);
+        Assert.Empty(svg.QuerySelectorAll("line"));
+        Assert.Empty(svg.QuerySelectorAll("circle"));
+    }
+
+    // 488 AC-4: the Decisions button's icon is the exclamation mark (a line and a dot), decorative and unfocusable.
+    [Fact]
+    public async Task DecisionsButton_ExclamationMarkIcon()
+    {
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IElement svg = cut.Find(".notes-bar-buttons button.decisions-open svg");
         Assert.Equal("false", svg.GetAttribute("focusable"));
         Assert.Equal("currentColor", svg.GetAttribute("stroke"));
         Assert.Equal("0 0 24 24", svg.GetAttribute("viewBox"));

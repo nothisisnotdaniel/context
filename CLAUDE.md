@@ -1517,8 +1517,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     filters.` in place of the list, and per row a grey `span.person-details` in the button (roles `, ` joined, ` · `,
     affiliations, through `OneLine`). A bad index: everyone, no filters, red `Can't read the attributes.`. Reloads on
     `State.Changed` keeping the rows; a selection that is gone resets to `All`; older results are dropped.
-    **Todos page (job 331):** `AllTodosPanel` (`section.page.all-todos-panel`, `aria-label` `Todos`; the exclamation-mark
-    icon `button.todos-open` in `NotesPanel`'s bar between Tags and Settings, `OnTodos`; `Main`'s `Page.Todos` through
+    **Todos page (job 331):** `AllTodosPanel` (`section.page.all-todos-panel`, `aria-label` `Todos`; the checkbox
+    icon (a rounded `rect` and a tick `polyline`, job 488) `button.todos-open` in `NotesPanel`'s bar between Tags and
+    Decisions, `OnTodos`; `Main`'s `Page.Todos` through
     `OpenPage`) lists every open global todo from the snapshot only (`NoteTodos.Merge(Todos, NoteTodos)`: `todos.json`
     todos, tied ones included, and `- { }` note lines; never `- [ ]`/`- [>]`), in that order split into `section`s with an
     `h3` and `ul.all-todos-list`: `Overdue`, `Today`, `Upcoming`, `No due date` (only groups with rows; waiting-for todos
@@ -1590,7 +1591,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     then shows `button.search-back` (`Back to search`) above the breadcrumb; it shows the page again for that text
     with `Focus` = the note (that row, else the first, is the tab stop and gets the focus). It goes when another note,
     Today, a day or any page opens, the Search page included.
-    `DecisionsPanel` (job 180, job 343, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the
+    `DecisionsPanel` (job 180, job 343, `/decisions [tag]`, or with no tag the exclamation-mark icon `button.decisions-open`
+    in `NotesPanel`'s bar between Todos and Settings, `OnDecisions`, job 488; both go through `Main.ShowDecisions`;
+    `Main`'s `decisionsShown`, after `SearchPanel`) has the
     heading `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)`
     (`DecisionsView.Build` under `indexGate`, never throws): per decision a grey `span.date`, `span.decision-number`
     (a button `Decision 1234`, or `Decision ab12-1234` for another prefix or a clash alias, that opens the note at the
