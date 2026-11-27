@@ -3592,6 +3592,57 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
+    // 488 AC-5, AC-7: the notes bar's Decisions button shows every decision, as /decisions does; a note button opens
+    // the note and hides the panel; Close hides it too.
+    [Fact]
+    public async Task DecisionsButton_ShowsAllDecisions_CloseAndOpenHideIt()
+    {
+        data.WriteDecisionFolder();
+        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\n\n!d ship it\n");
+        data.WriteNote("2026-11-11 Plan", "!d paint\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.decisions-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Decisions", cut.Find(".decisions-panel h2").TextContent);
+
+        await cut.FindAll(".decisions-panel .note-button")[1].ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
+
+        await cut.Find("button.decisions-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        await cut.Find(".decisions-panel button.close").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
+    }
+
+    // 488 AC-6: the Decisions button while /decisions #work is shown replaces the tagged view with the full one.
+    [Fact]
+    public async Task DecisionsButton_ReplacesTaggedView()
+    {
+        data.WriteDecisionFolder();
+        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\n\n!d ship it\n");
+        data.WriteNote("2026-11-11 Plan", "!d paint\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/decisions #work");
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Decisions: #work", cut.Find(".decisions-panel h2").TextContent);
+
+        await cut.Find("button.decisions-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Decisions", cut.Find(".decisions-panel h2").TextContent);
+    }
+
     // 343 AC-12, 349 AC-9: a decision's label in the panel opens its note and puts the editor at that decision; the same number
     // with the note already open jumps in place without remounting.
     [Fact]

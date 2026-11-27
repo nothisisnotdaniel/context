@@ -12,7 +12,7 @@
     {
         <div class="layout" tabindex="-1" @ref="layout" @onkeydown="LayoutKey">
             <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnSearch="ShowSearch" />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnDecisions="ShowDecisions" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
@@ -706,6 +706,16 @@ else
     }
 
     private void CloseDecisions() => decisionsShown = null;
+
+    // The decisions overview: every note's decisions, or those of a tag's notes. The notes bar's Decisions button
+    // (job 488) and /decisions both come here so the two cannot drift.
+    private void ShowDecisions() => ShowDecisions(string.Empty);
+
+    private void ShowDecisions(string tag)
+    {
+        decisionsShown = tag;
+        ShowStatus(string.Empty, string.Empty);
+    }
 
     private void CloseSimilar() => similarShown = false;
 
@@ -1513,8 +1523,7 @@ else
             case "/decisions":
                 // Every note's #!d decisions, or those of the notes with a tag: /decisions #work. Read only;
                 // DecisionsPanel shows the usage line for an invalid tag.
-                decisionsShown = rest;
-                ShowStatus(string.Empty, string.Empty);
+                ShowDecisions(rest);
                 break;
             case "/similar":
                 // Pairs of notes that look like duplicates (job 268). Read only until a Keep button is confirmed.
