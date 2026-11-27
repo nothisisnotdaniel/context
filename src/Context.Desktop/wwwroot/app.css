@@ -1203,7 +1203,9 @@ p.decision-clash button {
 ul.search-pop-hits {
     list-style: none;
     margin: 4px 0 0;
+    max-height: calc(100vh - 160px);
     max-width: min(560px, calc(100vw - 48px));
+    overflow-y: auto;
     padding: 0;
     width: 560px;
 }

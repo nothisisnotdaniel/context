@@ -3,8 +3,8 @@
    hands the text to the parent, which captures it to the inbox and answers in the main status line. Search opens the
    same kind of popover; Return hands the text to the parent, which shows the search panel, and Esc gives the focus
    back to the icon. While typing, after a short pause (ISearchPause), the popover lists up to MaxLiveHits matching
-   notes from the parent's live search (job 492); a row (click, or Enter after the arrow keys) opens that note. The pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown
-   day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
+   notes from the parent's live search (job 492); a row (click, or Enter after the arrow keys) opens that note. The
+   pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
    More actions (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent,
    which runs it. At most one of the four popovers is open. *@
 @implements IDisposable
@@ -116,6 +116,7 @@
     private string liveQuery = string.Empty;
     private readonly ElementReference[] liveRows = new ElementReference[MaxLiveHits];
     private int focusLiveRow = -1;
+    private bool disposed;
     private bool menuOpen;
     private int focusItem = -1;
     private int focused = -1;
@@ -379,9 +380,14 @@
             return;
         }
 
+        if (disposed)
+        {
+            return;
+        }
+
         await InvokeAsync(async () =>
         {
-            if (mine != liveRequest || !searchOpen || OnLiveSearch is not { } search)
+            if (disposed || mine != liveRequest || !searchOpen || OnLiveSearch is not { } search)
             {
                 return;
             }
@@ -395,8 +401,18 @@
                 return;
             }
 
-            SearchView result = await search.Run(text);
-            if (mine != liveRequest || !searchOpen)
+            SearchView result;
+            try
+            {
+                result = await search.Run(text);
+            }
+            catch (Exception)
+            {
+                // A failed live search shows nothing new; Return still runs the full search with its own messages.
+                return;
+            }
+
+            if (disposed || mine != liveRequest || !searchOpen)
             {
                 return;
             }
@@ -498,7 +514,13 @@
         ResetLive();
     }
 
-    public void Dispose() => CancelLivePause();
+    // A pause or search still running when the bar goes away never renders it.
+    public void Dispose()
+    {
+        disposed = true;
+        liveRequest++;
+        CancelLivePause();
+    }
 
     // Return closes the popover and hands the typed text to the parent (which shows the search panel); Esc closes it
     // and gives the focus back to the icon (the bar's own Esc handler also runs, and finds it closed).
