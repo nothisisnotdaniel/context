@@ -455,6 +455,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#531](backlog/531-test-the-case-only-note-name.md) Test the case-only note-name tie-break of person note todos
 - [?] [#532](backlog/532-test-control-characters-in-note-names.md) Test control characters in note names on the person page
 - [?] [#533](backlog/533-check-the-six-notes-bar-buttons.md) Check the six notes-bar buttons in the narrowest sidebar by eye
+- [?] [#534](backlog/534-check-the-sticky-note-bar-by.md) Check the sticky note bar by eye on macOS
 
 ## Dropped with the terminal UI
 
