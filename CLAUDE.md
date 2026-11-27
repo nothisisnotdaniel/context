@@ -1466,7 +1466,34 @@ Every factory agent reads this file before working on Context. Keep it short and
     `EditorInterop.SetThemeAsync(ThemeSetting())` (`ContextEditor.setTheme` with the fixed name) on its first render and
     on each `OnThemeChanged`. `DesktopFixture` plans `ContextEditor.setTheme` for every test, records the calls
     (`Themes()`) and releases `ThemeSet` once per call; `ThemeActionsTests` covers the action, the state read and
-    `Main`'s first call. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
+    `Main`'s first call. **Sidebars** (job 490, no Settings section): `SidebarLayout(LeftWidth, LeftCollapsed,
+    RightWidth, RightCollapsed)` (Core `SidebarLayout.cs`, with `SidebarSide`; `Default` 240/open, 280/open; bounds
+    left 160-480, right 200-520, `Step` 16; `WithWidth` clamps, `EdgeMoved(side, delta)` widens the left and narrows the
+    right as the edge moves right) is stored as `"sidebars":{"left":{"width":N,"collapsed":B},"right":{…}}`
+    (`SettingsStore.ReadSidebars`: missing file or property gives `Default`, a side whose width isn't an integer in bounds
+    or whose `collapsed` isn't a boolean is that side's default, throws only for an unreadable or non-object file;
+    `SaveSidebars` throws `ArgumentOutOfRangeException` for a width out of bounds before reading, else like
+    `SaveTheme`). `DesktopState.SidebarSetting()` never throws (`Default`); `DesktopActions.SetSidebars(layout)` (no
+    refresh) is Done with an empty text, else Refused/Failed with `SidebarsNotSavedText` `Can't save the sidebar layout.`,
+    which `Main` shows red in the status bar (the layout stays for the session; the next Done clears only that message).
+    `Main` reads it on its first render (after the theme) and calls `EditorInterop.SetSidebarsAsync(left, right)`
+    (`ContextEditor.setSidebars`, `editor/src/sidebars.js`: sets `--left-width`/`--right-width` in px on the root
+    element only for integers in bounds). `.layout` has five fixed columns (`var(--left-width,240px) 6px
+    minmax(0,1fr) 6px var(--right-width,280px)`) and the classes `left-collapsed`/`right-collapsed` (a 32px rail, that
+    separator not rendered, its column 0) and `resizing` (no text selection). Each aside (`#left-sidebar`,
+    `#right-sidebar`) holds `div.sidebar-head` with the icon-only `button.sidebar-toggle.left-toggle`/`.right-toggle`
+    (`Collapse/Expand left/right sidebar` as `aria-label` and `title`, `aria-expanded`, `aria-controls`) and
+    `div.sidebar-panels`, `hidden` while collapsed (the panels stay mounted). Between the regions,
+    `div.sidebar-resizer.left-resizer`/`.right-resizer` (`role="separator"`, `aria-orientation="vertical"`, `Resize
+    left/right sidebar`, `tabindex="0"`, `aria-valuenow/min/max`): a primary pointerdown starts a drag, `.layout`'s
+    pointermove/up/cancel are bound only while dragging; a move sets the width from the drag's start and calls
+    `setSidebars` without a render (`Main` implements `IHandleEvent`: an event that sets `quietEvent` is not rendered),
+    a move with no button pressed ends the drag (a release outside the window), the release saves once when the layout
+    changed. Keys on a separator: ArrowRight/ArrowLeft move the edge by `Step`, Home/End the bounds, Enter collapses and
+    focuses the toggle; each change saves once (a change made while a save runs is saved right after it). `DesktopFixture`
+    plans `ContextEditor.setSidebars`, records the calls (`Sidebars()`) and releases `SidebarsSet` once per call;
+    `SidebarActionsTests` (action, state read) and `SidebarLayoutUiTests` (through `Main`) cover the desktop,
+    `SidebarLayoutTests` and `SettingsStoreTests` the Core. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
     (`CalendarLinkView.Show`: grey `No calendar link set.`, the masked link with the last download in the calendar's
     zone, or red `Can't read calendar-link.txt. …`), one `<input type="password">` (no `value`, no `@bind`,
     `maxlength` `DesktopActions.MaxCalendarLinkLength` = 2048; rebuilt with a new `@key` after a save so the typed
@@ -1986,7 +2013,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     scroll, `--line` border), and shows one `button type="button"` (`outline-item level-<n>`, plain text) per heading from
     `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
     **Sidebar appointments** (job 214): `DayAppointmentsPanel` (`section.day-appointments`, `aria-label="Appointments"`)
-    is the first child of `aside.todos-region` in every state. Its `h2.day-appointments-day` reads `Today` for
+    is the first child of `aside.todos-region`'s `div.sidebar-panels` (job 490) in every state. Its `h2.day-appointments-day` reads `Today` for
     `Snapshot.Today`, else `dddd, d MMM yyyy` (invariant, job 289), `title` always the full `dddd, d MMMM yyyy`;
     icon-only `button.day-prev`/`day-next` (`Previous day`/`Next day`) step the day, disabled at 1900-01-01/2100-12-31 (the chosen day is in memory only; back on today it follows the
     snapshot). Job 289: the `h2` holds one `button.day-appointments-open` (`aria-haspopup="dialog"`, `aria-expanded`)
@@ -2382,7 +2409,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `UpdateLogTests` (job 396, temp root, fixed clock), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `WebLinkActionsTests` (`OpenWebLink`, with `FakeUrlLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `AppointmentNoteActionsTests` (`CreateAppointmentNote`, job 397), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `UpdateLogTests` (job 396, temp root, fixed clock), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `WebLinkActionsTests` (`OpenWebLink`, with `FakeUrlLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `AppointmentNoteActionsTests` (`CreateAppointmentNote`, job 397), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `SidebarActionsTests` and `SidebarLayoutUiTests` (job 490), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

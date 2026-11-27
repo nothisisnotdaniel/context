@@ -1,5 +1,6 @@
 @inherits StateComponent
 @implements IAsyncDisposable
+@implements IHandleEvent
 
 <CrashHintBar />
 @if (Snapshot is { } snapshot)
@@ -10,10 +11,35 @@
     }
     else
     {
-        <div class="layout" tabindex="-1" @ref="layout" @onkeydown="LayoutKey">
-            <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnDecisions="ShowDecisions" OnSearch="ShowSearch" />
+        <div class="@LayoutClass" tabindex="-1" @ref="layout" @onkeydown="LayoutKey"
+             @onpointermove="@(resize is null ? default : EventCallback.Factory.Create<PointerEventArgs>(this, ResizeMove))"
+             @onpointerup="@(resize is null ? default : EventCallback.Factory.Create<PointerEventArgs>(this, EndResize))"
+             @onpointercancel="@(resize is null ? default : EventCallback.Factory.Create<PointerEventArgs>(this, EndResize))">
+            <aside class="notes-region" id="@LeftRegionId">
+                <div class="sidebar-head">
+                    <button type="button" class="sidebar-toggle left-toggle" @ref="leftToggle" aria-label="@ToggleText(SidebarSide.Left)" title="@ToggleText(SidebarSide.Left)"
+                            aria-expanded="@(sidebars.LeftCollapsed ? "false" : "true")" aria-controls="@LeftRegionId"
+                            @onclick="() => SaveSidebarsAsync(sidebars.Toggled(SidebarSide.Left))">
+                        @if (sidebars.LeftCollapsed)
+                        {
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>
+                        }
+                        else
+                        {
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="15 6 9 12 15 18"/></svg>
+                        }
+                    </button>
+                </div>
+                <div class="sidebar-panels" hidden="@sidebars.LeftCollapsed">
+                    <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnDecisions="ShowDecisions" OnSearch="ShowSearch" />
+                </div>
             </aside>
+            @if (!sidebars.LeftCollapsed)
+            {
+                <div class="sidebar-resizer left-resizer" role="separator" aria-orientation="vertical" aria-label="Resize left sidebar" tabindex="0"
+                     aria-controls="@LeftRegionId" aria-valuenow="@sidebars.LeftWidth" aria-valuemin="@SidebarLayout.LeftMin" aria-valuemax="@SidebarLayout.LeftMax"
+                     @onpointerdown="e => StartResize(SidebarSide.Left, e)" @onkeydown="e => ResizerKey(SidebarSide.Left, e)"></div>
+            }
             <main class="current-region">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
@@ -194,15 +220,37 @@
                     }
                 </div>
             </main>
-            <aside class="todos-region">
-                <DayAppointmentsPanel OnOpen="OpenAppointment" />
-                <TimesTodayPanel />
-                @if (openName is not null && page == Page.None)
-                {
-                    <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
-                }
-                <TodoPanel @ref="todoPanel" OnPerson="OpenMention" OnOpen="RequestOpen" />
-                <ToReviewPanel Guard="ReviewHeld" OnReviewed="Reviewed" OnOpen="RequestOpen" />
+            @if (!sidebars.RightCollapsed)
+            {
+                <div class="sidebar-resizer right-resizer" role="separator" aria-orientation="vertical" aria-label="Resize right sidebar" tabindex="0"
+                     aria-controls="@RightRegionId" aria-valuenow="@sidebars.RightWidth" aria-valuemin="@SidebarLayout.RightMin" aria-valuemax="@SidebarLayout.RightMax"
+                     @onpointerdown="e => StartResize(SidebarSide.Right, e)" @onkeydown="e => ResizerKey(SidebarSide.Right, e)"></div>
+            }
+            <aside class="todos-region" id="@RightRegionId">
+                <div class="sidebar-head">
+                    <button type="button" class="sidebar-toggle right-toggle" @ref="rightToggle" aria-label="@ToggleText(SidebarSide.Right)" title="@ToggleText(SidebarSide.Right)"
+                            aria-expanded="@(sidebars.RightCollapsed ? "false" : "true")" aria-controls="@RightRegionId"
+                            @onclick="() => SaveSidebarsAsync(sidebars.Toggled(SidebarSide.Right))">
+                        @if (sidebars.RightCollapsed)
+                        {
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="15 6 9 12 15 18"/></svg>
+                        }
+                        else
+                        {
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 6 15 12 9 18"/></svg>
+                        }
+                    </button>
+                </div>
+                <div class="sidebar-panels" hidden="@sidebars.RightCollapsed">
+                    <DayAppointmentsPanel OnOpen="OpenAppointment" />
+                    <TimesTodayPanel />
+                    @if (openName is not null && page == Page.None)
+                    {
+                        <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
+                    }
+                    <TodoPanel @ref="todoPanel" OnPerson="OpenMention" OnOpen="RequestOpen" />
+                    <ToReviewPanel Guard="ReviewHeld" OnReviewed="Reviewed" OnOpen="RequestOpen" />
+                </div>
             </aside>
         </div>
         @if (discarding)
@@ -360,6 +408,19 @@ else
     private string moveText = string.Empty;
     private ElementReference moveField;
     private bool focusField;
+    // The sidebars (job 490): the layout shown, the drag in progress (null when none), the toggle to focus after the
+    // next render, the id of the sidebar save error in the status bar, and whether the running event skips its render.
+    private const string LeftRegionId = "left-sidebar";
+    private const string RightRegionId = "right-sidebar";
+    private SidebarLayout sidebars = SidebarLayout.Default;
+    private SidebarDrag? resize;
+    private SidebarSide? focusToggle;
+    private ElementReference leftToggle;
+    private ElementReference rightToggle;
+    private long sidebarStatusId;
+    private bool sidebarSaving;
+    private bool sidebarPending;
+    private bool quietEvent;
 
     /// <summary>The status line when the automatic briefing was written while a note had unsaved changes.</summary>
     internal static string BriefingReadyText(string name) =>
@@ -548,6 +609,13 @@ else
         if (firstRender)
         {
             await ApplySavedTheme();
+            await ApplySavedSidebars();
+        }
+
+        if (focusToggle is { } toggle)
+        {
+            focusToggle = null;
+            await (toggle == SidebarSide.Left ? leftToggle : rightToggle).FocusAsync();
         }
 
         if (focusRename && renaming)
@@ -814,6 +882,179 @@ else
     // Job 341: the saved theme, at first render and after each theme saved in Settings; the page only ever gets a fixed
     // name, and an unreadable settings.json gives System.
     private async Task ApplySavedTheme() => await ThemeInterop.SetThemeAsync(await State.ThemeSetting());
+
+    // Job 490: the saved sidebar layout at first render; an unreadable settings.json gives the default, with no error.
+    private async Task ApplySavedSidebars()
+    {
+        sidebars = await State.SidebarSetting();
+        await ThemeInterop.SetSidebarsAsync(sidebars.LeftWidth, sidebars.RightWidth);
+        StateHasChanged();
+    }
+
+    private string LayoutClass =>
+        "layout" + (sidebars.LeftCollapsed ? " left-collapsed" : string.Empty)
+        + (sidebars.RightCollapsed ? " right-collapsed" : string.Empty) + (resize is null ? string.Empty : " resizing");
+
+    private string ToggleText(SidebarSide side) =>
+        (sidebars.Collapsed(side) ? "Expand " : "Collapse ") + (side == SidebarSide.Left ? "left" : "right") + " sidebar";
+
+    // The one place the sidebar layout is saved (job 490): shown at once, kept for the session when the save fails.
+    private async Task SaveSidebarsAsync(SidebarLayout next)
+    {
+        SidebarLayout before = sidebars;
+        sidebars = next;
+        if (next.LeftWidth != before.LeftWidth || next.RightWidth != before.RightWidth)
+        {
+            await ThemeInterop.SetSidebarsAsync(next.LeftWidth, next.RightWidth);
+        }
+
+        // A change made while a save runs (a fast key repeat) is saved right after it, as the latest layout.
+        if (sidebarSaving)
+        {
+            sidebarPending = true;
+            return;
+        }
+
+        sidebarSaving = true;
+        ActionResult saved;
+        try
+        {
+            do
+            {
+                sidebarPending = false;
+                saved = await Actions.SetSidebars(sidebars);
+            }
+            while (sidebarPending);
+        }
+        finally
+        {
+            sidebarSaving = false;
+        }
+
+        if (saved.Kind == ActionKind.Done)
+        {
+            Bar.Clear(sidebarStatusId);
+            sidebarStatusId = 0;
+        }
+        else
+        {
+            ShowStatus(DesktopActions.SidebarsNotSavedText, "red");
+            sidebarStatusId = statusId;
+        }
+    }
+
+    // A primary-button press on a separator starts a drag; the moves and the release arrive on .layout.
+    private void StartResize(SidebarSide side, PointerEventArgs e)
+    {
+        if (e.Button != 0 || sidebars.Collapsed(side))
+        {
+            return;
+        }
+
+        resize = new SidebarDrag(side, e.ClientX, sidebars);
+    }
+
+    // Each move sets the width from where the drag started, without a render; a move with no button pressed (the
+    // release happened outside the window) ends the drag.
+    private async Task ResizeMove(PointerEventArgs e)
+    {
+        if (resize is not { } drag)
+        {
+            return;
+        }
+
+        if ((e.Buttons & 1) == 0)
+        {
+            await EndResize(e);
+            return;
+        }
+
+        quietEvent = true;
+        SidebarLayout next = drag.Start.EdgeMoved(drag.Side, (int)Math.Round(e.ClientX - drag.StartX));
+        if (next == sidebars)
+        {
+            return;
+        }
+
+        sidebars = next;
+        await ThemeInterop.SetSidebarsAsync(next.LeftWidth, next.RightWidth);
+    }
+
+    // The release (or a cancel) ends the drag and saves once, only when the layout changed.
+    private async Task EndResize(PointerEventArgs e)
+    {
+        if (resize is not { } drag)
+        {
+            return;
+        }
+
+        resize = null;
+        if (sidebars != drag.Start)
+        {
+            await SaveSidebarsAsync(sidebars);
+        }
+    }
+
+    // The keyboard on a focused separator: arrows move the edge by a step, Home/End go to the bounds, Enter collapses
+    // the side and focuses its toggle. A key that changes nothing saves nothing.
+    private async Task ResizerKey(SidebarSide side, KeyboardEventArgs e)
+    {
+        SidebarLayout? next = e.Key switch
+        {
+            "ArrowRight" => sidebars.EdgeMoved(side, SidebarLayout.Step),
+            "ArrowLeft" => sidebars.EdgeMoved(side, -SidebarLayout.Step),
+            "Home" => sidebars.WithWidth(side, SidebarLayout.Min(side)),
+            "End" => sidebars.WithWidth(side, SidebarLayout.Max(side)),
+            "Enter" => sidebars.WithCollapsed(side, true),
+            _ => null,
+        };
+        if (next is null || next == sidebars)
+        {
+            return;
+        }
+
+        if (e.Key == "Enter")
+        {
+            focusToggle = side;
+        }
+
+        await SaveSidebarsAsync(next);
+    }
+
+    // ComponentBase's event handling, except that an event which sets quietEvent (a drag move) is not rendered.
+    Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem callback, object? arg)
+    {
+        quietEvent = false;
+        Task task = callback.InvokeAsync(arg);
+        bool quiet = quietEvent;
+        quietEvent = false;
+        bool pending = task.Status != TaskStatus.RanToCompletion && task.Status != TaskStatus.Canceled;
+        if (!quiet)
+        {
+            StateHasChanged();
+        }
+
+        return pending ? RenderAfterAsync(task, quiet) : Task.CompletedTask;
+    }
+
+    private async Task RenderAfterAsync(Task task, bool quiet)
+    {
+        try
+        {
+            await task;
+        }
+        catch when (task.IsCanceled)
+        {
+            return;
+        }
+
+        if (!quiet)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private sealed record SidebarDrag(SidebarSide Side, double StartX, SidebarLayout Start);
 
     // A tag's board (job 242): a page in place of the note area; a text that is no tag shows the usage line instead.
     private void ShowBoard(string tag)

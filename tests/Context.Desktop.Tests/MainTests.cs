@@ -29,14 +29,14 @@ public sealed class MainTests : IDisposable
         await cut.InvokeAsync(() => find().ClickAsync(new MouseEventArgs()));
     }
 
-    // AC-4 layout: notes on the left, the main region in the middle, todos on the right.
+    // AC-4 layout: notes on the left, the main region in the middle, todos on the right (job 490: a separator between each).
     [Fact]
     public async Task Render_ThreeRegions()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal(
-            ["notes-region", "current-region", "todos-region"],
+            ["notes-region", "sidebar-resizer left-resizer", "current-region", "sidebar-resizer right-resizer", "todos-region"],
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
     }
 
@@ -102,7 +102,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Contains("Buy milk", cut.Find(".todos-region").TextContent), Wait);
         Assert.Equal(
-            ["notes-region", "current-region", "todos-region"],
+            ["notes-region", "sidebar-resizer left-resizer", "current-region", "sidebar-resizer right-resizer", "todos-region"],
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
         // 240: the sidebar lists recently opened notes; Alpha was never opened.
         Assert.Contains("No recently opened notes.", cut.Find(".notes-region").TextContent);

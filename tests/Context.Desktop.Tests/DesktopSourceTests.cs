@@ -382,7 +382,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"margin-bottom: \d+px;", panel);
         Assert.DoesNotContain(".lossy", css, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"(?m)^\.outline-panel\s*\{", css);
-        Assert.Contains("grid-template-columns: 240px minmax(0, 1fr) 280px;", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: var(--left-width, 240px) 6px minmax(0, 1fr) 6px var(--right-width, 280px);", css, StringComparison.Ordinal);
 
         string[] outlineRules = System.Text.RegularExpressions.Regex.Matches(css.ReplaceLineEndings("\n"), @"(?m)^([^\n{}]*outline-(?:panel|item)[^\n{]*)\{([^}]*)\}")
             .Select(m => m.Groups[2].Value)
@@ -522,7 +522,8 @@ public sealed class DesktopSourceTests
         Assert.Contains("position: relative;", topBar, StringComparison.Ordinal);
     }
 
-    // 489 AC-3: the outline and both sidebars still scroll on their own, and the three-column layout is unchanged.
+    // 489 AC-3: the outline and both sidebars still scroll on their own; the layout keeps its height (job 490: the
+    // columns now hold the two separators and the saved widths).
     [Fact]
     public void AppCss_StickyBar_LeavesSidebarsAndLayout()
     {
@@ -533,7 +534,7 @@ public sealed class DesktopSourceTests
         string sidebars = Assert.Single(CssRules(css), r => r.Selector == ".notes-region,\n.todos-region").Body;
         Assert.Contains("overflow-y: auto;", sidebars, StringComparison.Ordinal);
         string layout = Assert.Single(CssRules(css), r => r.Selector == ".layout").Body;
-        Assert.Contains("grid-template-columns: 240px minmax(0, 1fr) 280px;", layout, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: var(--left-width, 240px) 6px minmax(0, 1fr) 6px var(--right-width, 280px);", layout, StringComparison.Ordinal);
         Assert.Contains("height: calc(100% - var(--status-bar-height));", layout, StringComparison.Ordinal);
     }
 
@@ -631,12 +632,13 @@ public sealed class DesktopSourceTests
         const int CalendarDayRing = 1;
         const int SidebarDayPickerRings = 2;
         const int DecisionPickerAndCopyRings = 2; // Job 349: the picker and its rows; the Copy and clash buttons.
+        const int SidebarResizeRings = 2; // Job 490: the separators and the sidebar toggles.
         string root = RepoFiles.Root();
         string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
 
         Assert.Equal(
-            RingsInAppCssBefore211 + CalendarDayRing + SidebarDayPickerRings + DecisionPickerAndCopyRings,
+            RingsInAppCssBefore211 + CalendarDayRing + SidebarDayPickerRings + DecisionPickerAndCopyRings + SidebarResizeRings,
             System.Text.RegularExpressions.Regex.Matches(css, @"outline: 2px solid var\(--accent-strong\)").Count);
         Assert.Contains(
             "outline: 2px solid var(--accent-strong);",

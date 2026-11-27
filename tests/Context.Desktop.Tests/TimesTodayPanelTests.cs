@@ -75,7 +75,7 @@ public sealed class TimesTodayPanelTests : IDisposable
         WaitForLine(cut, BookedLine);
         WaitForSidebar(cut);
 
-        IElement aside = cut.Find("aside.todos-region");
+        IElement aside = cut.Find("aside.todos-region > .sidebar-panels");
         Assert.Contains("day-appointments", aside.Children[0].ClassList);
         IElement section = aside.Children[1];
         Assert.Equal("SECTION", section.TagName);
@@ -162,8 +162,8 @@ public sealed class TimesTodayPanelTests : IDisposable
         data.State!.Tick();
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("section.times-today")), Wait);
-        Assert.Contains("day-appointments", cut.Find("aside.todos-region").Children[0].ClassList);
-        Assert.DoesNotContain("times-today", cut.Find("aside.todos-region").Children[1].ClassList);
+        Assert.Contains("day-appointments", cut.Find("aside.todos-region > .sidebar-panels").Children[0].ClassList);
+        Assert.DoesNotContain("times-today", cut.Find("aside.todos-region > .sidebar-panels").Children[1].ClassList);
     }
 
     // AC-7: after the file changes and Tick runs, the new line shows; Loading… never shows in between.
@@ -203,7 +203,7 @@ public sealed class TimesTodayPanelTests : IDisposable
             Assert.DoesNotContain(seen, text => text.Contains("Loading", StringComparison.Ordinal));
         }
 
-        Assert.DoesNotContain("Loading", cut.Find("aside.todos-region").Children[1].TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("Loading", cut.Find("aside.todos-region > .sidebar-panels").Children[1].TextContent, StringComparison.Ordinal);
     }
 
     // AC-7: a state change (refresh) reloads it too.

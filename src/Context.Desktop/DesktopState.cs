@@ -1119,6 +1119,24 @@ internal sealed class DesktopState
     }
 
     /// <summary>
+    /// The saved sidebar layout (job 490, <c>"sidebars"</c> in <c>settings.json</c>), off the calling thread. Never
+    /// throws: a missing, broken or unreadable <c>settings.json</c> gives <see cref="SidebarLayout.Default"/>.
+    /// </summary>
+    public Task<SidebarLayout> SidebarSetting() => Task.Run(SidebarsNow);
+
+    private SidebarLayout SidebarsNow()
+    {
+        try
+        {
+            return new SettingsStore(notes.Root).ReadSidebars();
+        }
+        catch (Exception)
+        {
+            return SidebarLayout.Default;
+        }
+    }
+
+    /// <summary>
     /// The page title for a link pasted into a plain note, or <c>null</c>. Asks the page-title source (once) only when
     /// the setting is on; with it off (or unreadable), without a source or once <paramref name="token"/> is cancelled,
     /// nothing is requested. Never throws.

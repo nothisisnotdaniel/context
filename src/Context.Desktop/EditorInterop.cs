@@ -279,6 +279,13 @@ internal sealed class EditorInterop
     public ValueTask SetThemeAsync(AppTheme theme) =>
         js.InvokeVoidAsync("ContextEditor.setTheme", SettingsStore.ThemeName(theme));
 
+    /// <summary>
+    /// Applies the sidebar widths to the page (job 490): <c>ContextEditor.setSidebars</c> with two integers, which the
+    /// bundle checks again and sets as <c>--left-width</c>/<c>--right-width</c>. Needs no mounted editor.
+    /// </summary>
+    public ValueTask SetSidebarsAsync(int left, int right) =>
+        js.InvokeVoidAsync("ContextEditor.setSidebars", left, right);
+
     /// <summary>Called by the editor when a tag is clicked.</summary>
     [JSInvokable]
     public Task OnTag(string raw) => TagClicked?.Invoke(raw) ?? Task.CompletedTask;

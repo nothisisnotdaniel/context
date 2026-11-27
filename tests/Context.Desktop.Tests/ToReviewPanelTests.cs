@@ -255,8 +255,8 @@ public sealed class ToReviewPanelTests : IDisposable
         data.WriteNote("Plan", "review:2026-10-01\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("aside.todos-region > section.to-review")), Wait);
-        Assert.Equal("todos", cut.Find("aside.todos-region > section.to-review").PreviousElementSibling!.ClassName);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("aside.todos-region > .sidebar-panels > section.to-review")), Wait);
+        Assert.Equal("todos", cut.Find("aside.todos-region > .sidebar-panels > section.to-review").PreviousElementSibling!.ClassName);
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)

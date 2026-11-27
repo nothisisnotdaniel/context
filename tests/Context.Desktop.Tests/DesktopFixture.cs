@@ -158,6 +158,13 @@ internal sealed class DesktopFixture : IDisposable
     public IReadOnlyList<string> Themes() =>
         Bunit.JSInterop.Invocations["ContextEditor.setTheme"].Select(i => (string)i.Arguments[0]!).ToList();
 
+    /// <summary>Released once per <c>ContextEditor.setSidebars</c> call (job 490), so a test awaits a call off the renderer.</summary>
+    public SemaphoreSlim SidebarsSet { get; } = new SemaphoreSlim(0);
+
+    /// <summary>The (left, right) widths passed to <c>ContextEditor.setSidebars</c> so far, in order.</summary>
+    public IReadOnlyList<(int Left, int Right)> Sidebars() =>
+        Bunit.JSInterop.Invocations["ContextEditor.setSidebars"].Select(i => ((int)i.Arguments[0]!, (int)i.Arguments[1]!)).ToList();
+
     public DesktopActions? Actions { get; private set; }
 
     /// <summary>The note store the state and the actions share (set by <see cref="CreateState"/>).</summary>
@@ -313,6 +320,12 @@ internal sealed class DesktopFixture : IDisposable
         Bunit.JSInterop.SetupVoid("ContextEditor.setTheme", _ =>
         {
             ThemeSet.Release();
+            return true;
+        }).SetVoidResult();
+        // Job 490: Main applies the saved sidebar widths on its first render and on each change.
+        Bunit.JSInterop.SetupVoid("ContextEditor.setSidebars", _ =>
+        {
+            SidebarsSet.Release();
             return true;
         }).SetVoidResult();
         Bunit.Services.AddSingleton<IFileDialog>(Dialog);
