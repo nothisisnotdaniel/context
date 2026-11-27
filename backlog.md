@@ -333,7 +333,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#472](backlog/472-check-the-screenshot-capture-on-macos.md) Check the screenshot capture on macOS
 - [h] [#473](backlog/473-check-the-screenshot-capture-on-windows.md) Check the screenshot capture on Windows
 - [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
-- [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
+- [ ] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
 - [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
 - [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
 - [h] [#474](backlog/474-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS
@@ -341,7 +341,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#350](backlog/350-standup-catch-feed-and-calendar-errors.md) Standup: catch feed and calendar errors while composing
 - [?] [#351](backlog/351-standup-opens-today-s-note-before.md) /standup opens today's note before writing
 - [ ] [#353](backlog/353-fix-flaky-record-whileanotheractionisbusy-stilllis.md) Fix flaky Record_WhileAnotherActionIsBusy_StillListed test
-- [?] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
+- [ ] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
 - [?] [#355](backlog/355-merge-notes-clearer-message-when-a.md) Merge notes: clearer message when a step after the save fails
 - [?] [#356](backlog/356-merge-notes-re-check-subpages-right.md) Merge notes: re-check subpages right before the delete
 - [?] [#357](backlog/357-similar-notes-limit-pairs-when-many.md) Similar notes: limit pairs when many notes share a title
