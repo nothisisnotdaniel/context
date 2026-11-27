@@ -248,6 +248,9 @@ internal sealed class DesktopActions
     public const string FetchTitlesOnText = "Page titles on.";
     public const string FetchTitlesOffText = "Page titles off.";
     public const string SettingsNotSavedText = "Can't save settings.json.";
+
+    /// <summary>The red status text when the sidebar layout couldn't be saved (job 490).</summary>
+    public const string SidebarsNotSavedText = "Can't save the sidebar layout.";
     public const string ThemeSystemText = "Theme: System.";
     public const string ThemeLightText = "Theme: Light.";
     public const string ThemeDarkText = "Theme: Dark.";
@@ -1963,6 +1966,40 @@ internal sealed class DesktopActions
         }
 
         return new ActionResult(ActionKind.Done, ActionReason.None, ThemeText(theme));
+    }
+
+    /// <summary>
+    /// Stores the sidebar layout (job 490, <c>"sidebars"</c> in <c>settings.json</c>, every other property kept) without
+    /// a refresh: no note or todo changes. Done with an empty text; a width out of bounds is Refused, a file that can't be
+    /// read, would be too large or can't be written is not changed: Refused or Failed, all with
+    /// <see cref="SidebarsNotSavedText"/>.
+    /// </summary>
+    public Task<ActionResult> SetSidebars(SidebarLayout layout) => Run(() => SetSidebarsNow(layout), refresh: false);
+
+    private ActionResult SetSidebarsNow(SidebarLayout layout)
+    {
+        try
+        {
+            settings.SaveSidebars(layout);
+        }
+        catch (ArgumentException)
+        {
+            return Refused(ActionReason.Invalid, SidebarsNotSavedText);
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SidebarsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SidebarsNotSavedText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SidebarsNotSavedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, string.Empty);
     }
 
     /// <summary>The Done text for <paramref name="theme"/>.</summary>

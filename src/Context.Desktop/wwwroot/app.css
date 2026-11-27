@@ -143,8 +143,122 @@ ol {
 
 .layout {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr) 280px;
+    grid-template-columns: var(--left-width, 240px) 6px minmax(0, 1fr) 6px var(--right-width, 280px);
     height: calc(100% - var(--status-bar-height));
+}
+
+/* 490: a collapsed sidebar is a 32px rail with its toggle; its separator is not rendered, so its column is 0. */
+.layout.left-collapsed {
+    grid-template-columns: 32px 0 minmax(0, 1fr) 6px var(--right-width, 280px);
+}
+
+.layout.right-collapsed {
+    grid-template-columns: var(--left-width, 240px) 6px minmax(0, 1fr) 0 32px;
+}
+
+.layout.left-collapsed.right-collapsed {
+    grid-template-columns: 32px 0 minmax(0, 1fr) 0 32px;
+}
+
+/* Fixed columns, so a missing separator never moves a region into another column. */
+.layout > aside:first-child {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.layout > .left-resizer {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.layout > main {
+    grid-column: 3;
+    grid-row: 1;
+}
+
+.layout > .right-resizer {
+    grid-column: 4;
+    grid-row: 1;
+}
+
+.layout > aside:last-child {
+    grid-column: 5;
+    grid-row: 1;
+}
+
+/* While a separator is dragged, no text is selected and the pointer stays the resize cursor. */
+.layout.resizing {
+    cursor: col-resize;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.sidebar-resizer {
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.sidebar-resizer:hover,
+.layout.resizing .sidebar-resizer {
+    background: var(--line);
+}
+
+.sidebar-resizer:focus-visible {
+    background: var(--accent-strong);
+    outline: 2px solid var(--accent-strong);
+    outline-offset: -2px;
+}
+
+.sidebar-head {
+    display: flex;
+    justify-content: flex-end;
+    margin: -8px -8px 4px;
+}
+
+.todos-region .sidebar-head {
+    justify-content: flex-start;
+}
+
+.sidebar-toggle {
+    align-items: center;
+    color: var(--text);
+    display: inline-flex;
+    flex: none;
+    height: 24px;
+    justify-content: center;
+    padding: 0;
+    width: 24px;
+}
+
+.sidebar-toggle:hover {
+    color: var(--accent-strong);
+}
+
+.sidebar-toggle:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+.sidebar-toggle svg {
+    height: 18px;
+    width: 18px;
+}
+
+.sidebar-panels[hidden] {
+    display: none;
+}
+
+.layout.left-collapsed > .notes-region,
+.layout.right-collapsed > .todos-region {
+    overflow: hidden;
+    padding: 8px 3px;
+}
+
+.layout.left-collapsed > .notes-region .sidebar-head,
+.layout.right-collapsed > .todos-region .sidebar-head {
+    justify-content: center;
+    margin: 0;
 }
 
 /* 455: every feedback message, fixed along the bottom of the window, so it never scrolls away or hides in a panel. */
@@ -1439,8 +1553,10 @@ p.decision-clash button {
 
 .notes-bar-buttons {
     display: flex;
-    flex: none;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
     gap: 6px;
+    justify-content: flex-end;
 }
 
 .notes-bar-buttons button {

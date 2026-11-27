@@ -117,7 +117,7 @@ public sealed class OutlinePanelTests : IDisposable
 
         IElement nav = cut.Find("aside.todos-region nav.outline-panel");
         Assert.Equal("Outline", nav.GetAttribute("aria-label"));
-        Assert.Equal("todos-region", nav.ParentElement?.ClassName);
+        Assert.Equal("todos-region", nav.ParentElement?.ParentElement?.ClassName);
         Assert.Equal("todos", nav.NextElementSibling?.ClassName);
         Assert.Equal("SECTION", nav.NextElementSibling?.TagName);
         Assert.Empty(cut.FindAll(".note-area nav.outline-panel"));

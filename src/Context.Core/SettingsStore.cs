@@ -325,6 +325,11 @@ internal sealed class SettingsStore
     private const string RepositoriesKey = "repositories";
     private const string AppearanceKey = "appearance";
     private const string ThemeKey = "theme";
+    private const string SidebarsKey = "sidebars";
+    private const string LeftKey = "left";
+    private const string RightKey = "right";
+    private const string WidthKey = "width";
+    private const string CollapsedKey = "collapsed";
 
     /// <summary>The longest screenshot folder path.</summary>
     public const int MaxScreenshotFolderLength = 1024;
@@ -500,6 +505,43 @@ internal sealed class SettingsStore
         DayEndOf(document);
         SavedSearchesOf(document);
         document[AppearanceKey] = new JsonObject { [ThemeKey] = name };
+        Write(document);
+    }
+
+    /// <summary>
+    /// The saved sidebar layout (job 490): <c>"sidebars":{"left":{"width":N,"collapsed":B},"right":{…}}</c>. A missing
+    /// file or section gives <see cref="SidebarLayout.Default"/>; a side that isn't an object with an integer
+    /// <c>width</c> in its bounds and a boolean <c>collapsed</c> gives that side's default. Throws
+    /// <see cref="SettingsStoreException"/> only when the file itself can't be read or isn't a JSON object.
+    /// </summary>
+    public SidebarLayout ReadSidebars() => SidebarsOf(ReadRoot());
+
+    /// <summary>
+    /// Writes <c>"sidebars":{"left":{"width":N,"collapsed":B},"right":{…}}</c>, replacing whatever <c>sidebars</c>
+    /// held and keeping every other property. Throws <see cref="ArgumentOutOfRangeException"/> (nothing read or
+    /// written) for a width outside its bounds, otherwise like <see cref="SaveOutlook"/>.
+    /// </summary>
+    public void SaveSidebars(SidebarLayout layout)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        if (!SidebarLayout.IsWidth(SidebarSide.Left, layout.LeftWidth))
+        {
+            throw new ArgumentOutOfRangeException(nameof(layout), "The left width is out of range.");
+        }
+
+        if (!SidebarLayout.IsWidth(SidebarSide.Right, layout.RightWidth))
+        {
+            throw new ArgumentOutOfRangeException(nameof(layout), "The right width is out of range.");
+        }
+
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        document[SidebarsKey] = new JsonObject
+        {
+            [LeftKey] = new JsonObject { [WidthKey] = layout.LeftWidth, [CollapsedKey] = layout.LeftCollapsed },
+            [RightKey] = new JsonObject { [WidthKey] = layout.RightWidth, [CollapsedKey] = layout.RightCollapsed },
+        };
         Write(document);
     }
 
@@ -934,6 +976,49 @@ internal sealed class SettingsStore
             _ => AppTheme.System,
         };
     }
+
+    // The stored sidebars; each side that isn't {"width":<integer in bounds>,"collapsed":<bool>} gets its default.
+    private static SidebarLayout SidebarsOf(JsonObject document)
+    {
+        SidebarLayout layout = SidebarLayout.Default;
+        if (!document.TryGetPropertyValue(SidebarsKey, out JsonNode? node) || node is not JsonObject section)
+        {
+            return layout;
+        }
+
+        foreach ((SidebarSide side, string key) in new[] { (SidebarSide.Left, LeftKey), (SidebarSide.Right, RightKey) })
+        {
+            if (section.TryGetPropertyValue(key, out JsonNode? sideNode)
+                && sideNode is JsonObject stored
+                && IntOf(stored, WidthKey) is { } width
+                && SidebarLayout.IsWidth(side, width)
+                && BoolOf(stored, CollapsedKey) is { } collapsed)
+            {
+                layout = layout.WithWidth(side, width).WithCollapsed(side, collapsed);
+            }
+        }
+
+        return layout;
+    }
+
+    private static int? IntOf(JsonObject section, string key) =>
+        section.TryGetPropertyValue(key, out JsonNode? node)
+            && node is JsonValue value
+            && value.GetValueKind() == JsonValueKind.Number
+            && value.TryGetValue(out JsonElement element)
+            && element.TryGetInt32(out int number)
+            ? number
+            : null;
+
+    private static bool? BoolOf(JsonObject section, string key) =>
+        section.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value
+            ? value.GetValueKind() switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => null,
+            }
+            : null;
 
     private static string? StringOf(JsonNode? node) =>
         node is JsonValue value && value.GetValueKind() == JsonValueKind.String ? value.GetValue<string>() : null;

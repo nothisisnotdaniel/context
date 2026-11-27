@@ -32,7 +32,7 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Empty(cut.FindAll(".current-region p.no-note"));
         Assert.Equal("# Plan\n", js.MountedText());
         Assert.Equal(
-            ["notes-region", "current-region", "todos-region"],
+            ["notes-region", "sidebar-resizer left-resizer", "current-region", "sidebar-resizer right-resizer", "todos-region"],
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
     }
 

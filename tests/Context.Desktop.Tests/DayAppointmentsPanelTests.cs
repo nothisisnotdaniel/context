@@ -33,7 +33,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         WaitForItems(cut, 2);
 
-        IElement section = cut.Find("aside.todos-region").Children[0];
+        IElement section = cut.Find("aside.todos-region > .sidebar-panels").Children[0];
         Assert.Equal("SECTION", section.TagName);
         Assert.Contains("day-appointments", section.ClassList);
         Assert.Equal("Appointments", section.GetAttribute("aria-label"));
@@ -177,13 +177,13 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
         WaitForItems(cut, 2);
-        Assert.Contains("day-appointments", cut.Find("aside.todos-region").Children[0].ClassList);
+        Assert.Contains("day-appointments", cut.Find("aside.todos-region > .sidebar-panels").Children[0].ClassList);
         Assert.Equal("Today", Heading(cut));
 
         await cut.Find(".settings-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         WaitForItems(cut, 2);
-        Assert.Contains("day-appointments", cut.Find("aside.todos-region").Children[0].ClassList);
+        Assert.Contains("day-appointments", cut.Find("aside.todos-region > .sidebar-panels").Children[0].ClassList);
     }
 
     // 216 AC-9: a Stale feed shows the grey offline line with the cache time in the view's zone, below the list, on

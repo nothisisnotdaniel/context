@@ -742,7 +742,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void Sources_NeverSetLevelOne()
     {
         string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
-        string[] files = ["decisions.js", "glossary.js", "highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "theme.js", "view.js"];
+        string[] files = ["decisions.js", "glossary.js", "highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "sidebars.js", "theme.js", "view.js"];
         Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
 
         foreach (string file in files)
@@ -1602,6 +1602,53 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void SetTheme_NoDocument_DoesNothing()
     {
         Assert.Equal("true", bundle.Json("ContextEditor.setTheme(\"dark\") === undefined"));
+    }
+
+    // ---- 490: the sidebar widths ----
+
+    // 490 AC-9: setSidebars sets --left-width and --right-width on the root element for integers in bounds and
+    // leaves a variable alone for anything else ("abc", -5, a fraction, out of range, missing).
+    [Theory]
+    [InlineData("240, 280", "240px", "280px")]
+    [InlineData("160, 520", "160px", "520px")]
+    [InlineData("480, 200", "480px", "200px")]
+    [InlineData("\"abc\", 300", null, "300px")]
+    [InlineData("-5, -5", null, null)]
+    [InlineData("159, 521", null, null)]
+    [InlineData("481, 199", null, null)]
+    [InlineData("200.5, 300", null, "300px")]
+    [InlineData("\"240\", \"280\"", null, null)]
+    [InlineData("300", "300px", null)]
+    [InlineData("", null, null)]
+    public void SetSidebars_SetsValidWidthsOnly(string arguments, string? left, string? right)
+    {
+        string json = bundle.Json($$"""
+            (() => {
+              const props = {};
+              const root = { style: { setProperty(name, value) { props[name] = String(value); } } };
+              globalThis.document = { documentElement: root };
+              try {
+                ContextEditor.setSidebars({{arguments}});
+              } finally {
+                delete globalThis.document;
+              }
+              return [props["--left-width"] ?? null, props["--right-width"] ?? null, Object.keys(props).length];
+            })()
+            """);
+
+        int count = (left is null ? 0 : 1) + (right is null ? 0 : 1);
+        Assert.Equal(
+            "[" + (left is null ? "null" : Js(left)) + "," + (right is null ? "null" : Js(right)) + "," + count + "]",
+            json);
+        Assert.Equal("\"undefined\"", bundle.Json("typeof document"));
+    }
+
+    // 490 AC-9: the committed bundle exports setSidebars, and without a document it does nothing and doesn't throw.
+    [Fact]
+    public void SetSidebars_Exported_NoDocument_DoesNothing()
+    {
+        Assert.Equal("\"function\"", bundle.Json("typeof ContextEditor.setSidebars"));
+        Assert.Equal("true", bundle.Json("ContextEditor.setSidebars(240, 280) === undefined"));
     }
 
     // 341 AC-8: dark when data-theme is dark, or when there is none and the system prefers dark; otherwise default.

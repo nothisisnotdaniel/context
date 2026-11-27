@@ -953,4 +953,167 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal("dark", SettingsStore.ThemeName(AppTheme.Dark));
         Assert.Throws<ArgumentOutOfRangeException>(() => SettingsStore.ThemeName((AppTheme)7));
     }
+
+    // 490 AC-1: a missing file or a missing sidebars property gives the default layout and creates nothing.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{}")]
+    [InlineData("{\"theme\":\"dark\"}")]
+    [InlineData("{\"sidebars\":5}")]
+    [InlineData("{\"sidebars\":[]}")]
+    public void ReadSidebars_Missing_IsDefault(string? text)
+    {
+        if (text is not null)
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(FilePath, text);
+        }
+
+        Assert.Equal(SidebarLayout.Default, new SettingsStore(root).ReadSidebars());
+        Assert.Equal(text is not null, Directory.Exists(root));
+    }
+
+    // 490 AC-1: valid sides are read; extra properties are ignored.
+    [Fact]
+    public void ReadSidebars_Valid_GivesStoredLayout()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            FilePath,
+            "{\"sidebars\":{\"left\":{\"width\":160,\"collapsed\":true,\"x\":1},\"right\":{\"width\":520,\"collapsed\":false}}}");
+
+        Assert.Equal(new SidebarLayout(160, true, 520, false), new SettingsStore(root).ReadSidebars());
+    }
+
+    // 490 AC-1: a side whose width isn't an integer in bounds, or whose collapsed isn't a boolean, is that side's
+    // default; the other side is still read.
+    [Theory]
+    [InlineData("{\"width\":159,\"collapsed\":true}")]
+    [InlineData("{\"width\":481,\"collapsed\":true}")]
+    [InlineData("{\"width\":300.5,\"collapsed\":true}")]
+    [InlineData("{\"width\":\"300\",\"collapsed\":true}")]
+    [InlineData("{\"width\":300,\"collapsed\":\"true\"}")]
+    [InlineData("{\"width\":300,\"collapsed\":1}")]
+    [InlineData("{\"width\":300}")]
+    [InlineData("{\"collapsed\":true}")]
+    [InlineData("5")]
+    [InlineData("null")]
+    public void ReadSidebars_BadSide_FallsBackForThatSide(string left)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"sidebars\":{\"left\":" + left + ",\"right\":{\"width\":400,\"collapsed\":true}}}");
+
+        Assert.Equal(new SidebarLayout(240, false, 400, true), new SettingsStore(root).ReadSidebars());
+    }
+
+    // 490 AC-1: a file that isn't a JSON object, or a folder in its place, throws.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    public void ReadSidebars_Broken_Throws(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadSidebars());
+    }
+
+    [Fact]
+    public void ReadSidebars_FolderInPlace_Throws()
+    {
+        Directory.CreateDirectory(FilePath);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadSidebars());
+    }
+
+    // 490 AC-2: a save writes exactly the sidebars shape, replaces what it held, keeps the other properties and
+    // round-trips.
+    [Fact]
+    public void SaveSidebars_ReplacesSidebars_KeepsOthers_RoundTrips()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            FilePath,
+            "{\"appearance\":{\"theme\":\"dark\"},\"dayEnd\":{\"moved\":\"2026-11-14\"},"
+            + "\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"}],\"sidebars\":{\"old\":[1]}}");
+        SettingsStore store = new SettingsStore(root);
+        System.Text.Json.Nodes.JsonNode before = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        SidebarLayout layout = new(300, true, 216, false);
+
+        store.SaveSidebars(layout);
+
+        Assert.Equal(layout, store.ReadSidebars());
+        System.Text.Json.Nodes.JsonNode after = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        foreach (string key in new[] { "appearance", "dayEnd", "savedSearches" })
+        {
+            Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before[key], after[key]), key);
+        }
+
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse(
+                "{\"left\":{\"width\":300,\"collapsed\":true},\"right\":{\"width\":216,\"collapsed\":false}}"),
+            after["sidebars"]));
+        Assert.Equal(4, after.AsObject().Count);
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
+    // 490 AC-2: a save creates the folder and the file when there are none.
+    [Fact]
+    public void SaveSidebars_CreatesTheFile()
+    {
+        SettingsStore store = new SettingsStore(root);
+
+        store.SaveSidebars(SidebarLayout.Default);
+
+        Assert.Equal(SidebarLayout.Default, store.ReadSidebars());
+        Assert.Equal(
+            "{\n  \"sidebars\": {\n    \"left\": {\n      \"width\": 240,\n      \"collapsed\": false\n    },\n"
+            + "    \"right\": {\n      \"width\": 280,\n      \"collapsed\": false\n    }\n  }\n}\n",
+            File.ReadAllText(FilePath));
+    }
+
+    // 490 AC-2: a width outside its bounds throws and writes nothing.
+    [Theory]
+    [InlineData(159, 280)]
+    [InlineData(481, 280)]
+    [InlineData(240, 199)]
+    [InlineData(240, 521)]
+    public void SaveSidebars_OutOfRange_Throws_WritesNothing(int left, int right)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"theme\":\"x\"}");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SettingsStore(root).SaveSidebars(new SidebarLayout(left, false, right, false)));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
+    // 490 AC-2: a broken file is never overwritten.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    [InlineData("{\"dayEnd\":{\"moved\":5}}")]
+    public void SaveSidebars_Broken_Throws_AndIsNeverOverwritten(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).SaveSidebars(SidebarLayout.Default));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 490 AC-2: a save that would make the file over MaxBytes throws and writes nothing.
+    [Fact]
+    public void SaveSidebars_OverTheLimit_Throws_Unchanged()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"padding\":\"" + new string('x', 65_516) + "\"}");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsTooLargeException>(() => new SettingsStore(root).SaveSidebars(SidebarLayout.Default));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
 }
