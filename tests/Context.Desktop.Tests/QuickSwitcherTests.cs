@@ -361,9 +361,11 @@ public sealed class QuickSwitcherTests : IDisposable
     private void AssertFocused<TComponent>(IRenderedComponent<Main> cut, string field)
         where TComponent : IComponent
     {
+        System.Reflection.FieldInfo? info = typeof(TComponent)
+            .GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.True(info is not null, $"{typeof(TComponent).Name} has no private field {field}");
         string id = BoundedWait.Result(
-            cut.InvokeAsync(() => ((ElementReference)typeof(TComponent)
-                .GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            cut.InvokeAsync(() => ((ElementReference)info
                 .GetValue(cut.Instance is TComponent self ? self : cut.FindComponent<TComponent>().Instance)!).Id),
             BoundedWait.Dispatcher,
             $"QuickSwitcherTests reading {typeof(TComponent).Name}.{field} on the renderer's dispatcher");
