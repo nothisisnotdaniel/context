@@ -64,6 +64,13 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
 
     public static TheoryData<string> All() => new(FixtureFiles("lossless").Concat(FixtureFiles("lossy")));
 
+    // 489 AC-4: the built bundle reports the editor's top scroll margin (the sticky bar's 44px plus 5).
+    [Fact]
+    public void EditorBarMargin_Is49()
+    {
+        Assert.Equal("49", bundle.Json("ContextEditor.EditorBarMargin"));
+    }
+
     // AC-1: every lossless fixture comes back byte for byte (LF, as committed) and is reported lossless.
     [Theory]
     [MemberData(nameof(Lossless))]

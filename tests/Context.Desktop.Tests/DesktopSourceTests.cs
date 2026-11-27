@@ -478,6 +478,87 @@ public sealed class DesktopSourceTests
         Assert.Contains("outline: none;", RuleBody(editorCss, ".note-editor-body"), StringComparison.Ordinal);
     }
 
+    // 489 AC-1: the own .editor-bar rule is sticky at the top, opaque, below the popovers and as high as the shared
+    // height variable; the shared .editor-bar/.panel-bar rule gains nothing and .panel-bar is never sticky.
+    [Fact]
+    public void AppCss_EditorBar_IsSticky()
+    {
+        string css = AppCss();
+        string own = Assert.Single(CssRules(css), r => r.Selector == ".editor-bar").Body;
+        foreach (string declaration in new[]
+        {
+            "position: sticky;", "top: 0;", "z-index: 1;", "background: var(--background);",
+            "height: var(--editor-bar-height);", "justify-content: flex-start;",
+        })
+        {
+            Assert.Contains(declaration, own, StringComparison.Ordinal);
+        }
+
+        string shared = RuleBody(css, ".editor-bar,\n.panel-bar");
+        Assert.DoesNotContain("padding", shared, StringComparison.Ordinal);
+        Assert.DoesNotContain("margin-left", shared, StringComparison.Ordinal);
+        Assert.DoesNotContain("position", shared, StringComparison.Ordinal);
+        Assert.All(
+            CssRules(css).Where(r => r.Selector.Split(',').Any(sel => sel.Trim().Contains(".panel-bar", StringComparison.Ordinal))),
+            r => Assert.DoesNotContain("sticky", r.Body, StringComparison.Ordinal));
+    }
+
+    // 489 AC-2: the middle column still scrolls, defines the bar height and pads jump targets below the bar; the
+    // editor bar is the only sticky rule and the top bar stays relative.
+    [Fact]
+    public void AppCss_CurrentRegion_ScrollPaddingForTheBar()
+    {
+        string css = AppCss();
+        string region = Assert.Single(CssRules(css), r => r.Selector == ".current-region").Body;
+        Assert.Contains("overflow-y: auto;", region, StringComparison.Ordinal);
+        Assert.Contains("--editor-bar-height: 44px;", region, StringComparison.Ordinal);
+        Assert.Contains("scroll-padding-top: var(--editor-bar-height);", region, StringComparison.Ordinal);
+
+        (string Selector, string Body)[] sticky = CssRules(css)
+            .Where(r => System.Text.RegularExpressions.Regex.IsMatch(r.Body, @"position:\s*sticky"))
+            .ToArray();
+        Assert.Equal([".editor-bar"], sticky.Select(r => r.Selector).ToArray());
+        string topBar = Assert.Single(CssRules(css), r => r.Selector == ".top-bar").Body;
+        Assert.Contains("position: relative;", topBar, StringComparison.Ordinal);
+    }
+
+    // 489 AC-3: the outline and both sidebars still scroll on their own, and the three-column layout is unchanged.
+    [Fact]
+    public void AppCss_StickyBar_LeavesSidebarsAndLayout()
+    {
+        string css = AppCss();
+        string panel = RuleBody(css, ".todos-region .outline-panel");
+        Assert.Contains("max-height: 40vh;", panel, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto;", panel, StringComparison.Ordinal);
+        string sidebars = Assert.Single(CssRules(css), r => r.Selector == ".notes-region,\n.todos-region").Body;
+        Assert.Contains("overflow-y: auto;", sidebars, StringComparison.Ordinal);
+        string layout = Assert.Single(CssRules(css), r => r.Selector == ".layout").Body;
+        Assert.Contains("grid-template-columns: 240px minmax(0, 1fr) 280px;", layout, StringComparison.Ordinal);
+        Assert.Contains("height: calc(100% - var(--status-bar-height));", layout, StringComparison.Ordinal);
+    }
+
+    // 489 AC-4: the editor's top scroll margin is the bar height in app.css plus ProseMirror's default 5, and view.js
+    // passes it to the EditorView, so the two cannot drift apart.
+    [Fact]
+    public void ViewJs_ScrollMargin_MatchesEditorBarHeight()
+    {
+        System.Text.RegularExpressions.Match height = System.Text.RegularExpressions.Regex.Match(
+            AppCss(), @"--editor-bar-height:\s*(\d+)px;");
+        Assert.True(height.Success);
+        string view = EditorFile("editor/src/view.js").ReplaceLineEndings("\n");
+        System.Text.RegularExpressions.Match margin = System.Text.RegularExpressions.Regex.Match(
+            view, @"export const EditorBarMargin = (\d+);");
+        Assert.True(margin.Success);
+        Assert.Equal(int.Parse(height.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) + 5,
+            int.Parse(margin.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+
+        int at = view.IndexOf("new EditorView(element, {", StringComparison.Ordinal);
+        Assert.True(at >= 0);
+        int end = view.IndexOf("dispatchTransaction(tr)", at, StringComparison.Ordinal);
+        Assert.True(end > at);
+        Assert.Contains("scrollMargin: { top: EditorBarMargin, right: 5, bottom: 5, left: 5 },", view[at..end], StringComparison.Ordinal);
+    }
+
     // 211 AC-1, AC-5: no selector in app.css (inside @media blocks too) pairs the editor with a focus pseudo-class;
     // editor.css has only the chip's focus ring and (job 349) the Copy reference button's.
     [Fact]

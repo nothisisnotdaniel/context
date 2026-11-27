@@ -20,6 +20,10 @@ import { readGlossary, bucketTerms, matchTerms } from "./glossary.js";
 
 const editors = new WeakMap();
 
+// Job 489: the sticky editor bar's height (--editor-bar-height in app.css) plus ProseMirror's default 5, so the caret
+// scrolled into view never ends up under the bar.
+export const EditorBarMargin = 49;
+
 // The limits .NET checks again: NoteAttachments.MaxBytes and MaxFilesPerDrop.
 const maxAttachmentBytes = 10 * 1024 * 1024;
 const maxFilesPerDrop = 10;
@@ -1720,6 +1724,7 @@ export function mount(element, markdown, dotnet, images, name) {
     state,
     nodeViews: { list_item: listItemView, image: imageView(editor), code_block: codeView },
     attributes: { class: "note-editor-body", spellcheck: "true" },
+    scrollMargin: { top: EditorBarMargin, right: 5, bottom: 5, left: 5 },
     dispatchTransaction(tr) {
       view.updateState(view.state.apply(tr));
       if (tr.docChanged) {

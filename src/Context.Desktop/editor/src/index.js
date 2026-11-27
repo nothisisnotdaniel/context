@@ -1,7 +1,7 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, webHref, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, keySequenceMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, setGlossary, glossaryDecorationsJson, glossaryMetaJson, isDrawingSrc, imageViewTest } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, keySequenceMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, setGlossary, glossaryDecorationsJson, glossaryMetaJson, isDrawingSrc, imageViewTest, EditorBarMargin } from "./view.js";
 import { glossaryMatches } from "./glossary.js";
 import { decisionsJson, decisionReferences, applyDecisionEditsText, withFolderLine, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs } from "./decisions.js";
 import { pastedMarkdown, pastedDocJson, titledMarkdown, pastedImagesJson } from "./paste.js";
@@ -35,6 +35,8 @@ if (typeof globalThis.addEventListener === "function") {
 }
 
 globalThis.ContextEditor = Object.freeze({
+  // Job 489: the editor's top scroll margin, the sticky bar's height plus 5.
+  EditorBarMargin,
   // DOM-free: run in the tests too.
   roundTrip,
   isLossless,

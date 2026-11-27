@@ -269,9 +269,12 @@ ol {
 }
 
 .current-region {
+    /* 489: the sticky editor bar's height; scroll-padding keeps jump targets below it. */
+    --editor-bar-height: 44px;
     overflow-y: auto;
     padding: 20px 24px;
     padding-top: 0;
+    scroll-padding-top: var(--editor-bar-height);
 }
 
 .grey,
@@ -792,9 +795,16 @@ p.decision-clash button {
     flex: none;
 }
 
-/* The dot sits right after the name; space-between would push a lone dot to the right edge. */
+/* The dot sits right after the name; space-between would push a lone dot to the right edge.
+   489: the bar sticks at the top of the middle column while the note scrolls under it; z-index 1 stays below the
+   popover backdrops (2) and popovers (3). */
 .editor-bar {
+    background: var(--background);
+    height: var(--editor-bar-height);
     justify-content: flex-start;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 /* 283: the formatting toolbar (inline code, code block) after the title. */
