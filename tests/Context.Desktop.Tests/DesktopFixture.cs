@@ -98,6 +98,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The editor's pause after the last edit; it ends only on <see cref="FakeAutoSavePause.Elapse"/>.</summary>
     public FakeAutoSavePause AutoSave { get; } = new();
 
+    /// <summary>The Search popover's pause (job 492); it ends only on <see cref="FakeSearchPause.Elapse"/>.</summary>
+    public FakeSearchPause SearchPause { get; } = new();
+
     /// <summary>The window close guard; its close action only counts (<see cref="CloseCalls"/>).</summary>
     public CloseGuard Guard { get; }
 
@@ -344,6 +347,7 @@ internal sealed class DesktopFixture : IDisposable
         }).SetVoidResult();
         Bunit.Services.AddSingleton<IFileDialog>(Dialog);
         Bunit.Services.AddSingleton<IAutoSavePause>(AutoSave);
+        Bunit.Services.AddSingleton<ISearchPause>(SearchPause);
         Bunit.Services.AddSingleton(Guard);
         Bunit.Services.AddSingleton(CommandBar);
         Bunit.Services.AddSingleton(StatusBar);

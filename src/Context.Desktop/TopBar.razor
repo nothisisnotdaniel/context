@@ -2,10 +2,12 @@
    caret) and Pick a day (calendar), then More actions. Capture opens a small popover with one text field; Return
    hands the text to the parent, which captures it to the inbox and answers in the main status line. Search opens the
    same kind of popover; Return hands the text to the parent, which shows the search panel, and Esc gives the focus
-   back to the icon. The pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown
-   day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
+   back to the icon. While typing, after a short pause (ISearchPause), the popover lists up to MaxLiveHits matching
+   notes from the parent's live search (job 492); a row (click, or Enter after the arrow keys) opens that note. The
+   pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
    More actions (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent,
    which runs it. At most one of the four popovers is open. *@
+@implements IDisposable
 
 <div class="top-bar" @onkeydown="Key">
     <div class="top-bar-start"></div>
@@ -33,7 +35,39 @@
         <div class="search-pop-backdrop" @onclick="Close"></div>
         <div class="search-pop">
             <input type="text" aria-label="Search" placeholder="Search notes" maxlength="200" @ref="searchField"
-                   value="@searchText" @oninput="SearchInput" @onchange="SearchInput" @onkeydown="SearchKey" />
+                   value="@searchText" @oninput="SearchInput" @onchange="SearchChange" @onkeydown="SearchKey" />
+            @if (live is { } liveView)
+            {
+                @if (liveView.Kind is SearchViewKind.IndexUnreadable)
+                {
+                    <p class="red search-pop-status" role="status">Can't read the search index.</p>
+                }
+                else if (liveView.Hits.Count == 0)
+                {
+                    <p class="grey search-pop-status" role="status">No notes contain @DesktopText.OneLine(liveQuery.Trim()).</p>
+                }
+                else
+                {
+                    <p class="grey search-pop-count" role="status">@SearchPanel.CountText(liveView.Hits.Count)</p>
+                    <ul class="search-pop-hits" aria-label="Search results">
+                        @foreach ((SearchHit hit, int i) in liveView.Hits.Take(MaxLiveHits).Select((h, i) => (h, i)))
+                        {
+                            int index = i;
+                            string name = hit.Note;
+                            string shown = DesktopText.NoteName(name);
+                            SearchPanel.Snippet snippet = SearchPanel.SnippetOf(hit, liveQuery.Trim().Length);
+                            <li>
+                                <button type="button" class="note-button" title="@shown" @ref="liveRows[index]"
+                                        @onkeydown="e => LiveRowKey(e, index, name)" @onclick="() => OpenLive(name)"><span class="name cut">@shown</span><span class="line grey cut">@snippet.Before<mark>@snippet.Match</mark>@snippet.After</span></button>
+                            </li>
+                        }
+                    </ul>
+                    @if (liveView.Hits.Count > MaxLiveHits)
+                    {
+                        <p class="grey search-pop-more">@LiveSearch.MoreText(liveView.Hits.Count)</p>
+                    }
+                }
+            }
         </div>
     }
     @if (open)
@@ -76,6 +110,13 @@
     private string searchText = string.Empty;
     private ElementReference searchField;
     private ElementReference searchButton;
+    private CancellationTokenSource? livePause;
+    private int liveRequest;
+    private SearchView? live;
+    private string liveQuery = string.Empty;
+    private readonly ElementReference[] liveRows = new ElementReference[MaxLiveHits];
+    private int focusLiveRow = -1;
+    private bool disposed;
     private bool menuOpen;
     private int focusItem = -1;
     private int focused = -1;
@@ -100,6 +141,14 @@
         {
             focusSearch = false;
             await searchField.FocusAsync();
+        }
+
+        // An arrow key moved through the live results: that row takes the focus.
+        if (focusLiveRow >= 0 && searchOpen && live is { } shown && focusLiveRow < Math.Min(shown.Hits.Count, MaxLiveHits))
+        {
+            int index = focusLiveRow;
+            focusLiveRow = -1;
+            await liveRows[index].FocusAsync();
         }
 
         // Esc closed the search popover: the focus goes back to its icon.
@@ -164,6 +213,23 @@
     [Parameter]
     public EventCallback<string> OnSearch { get; set; }
 
+    /// <summary>
+    /// Searches the text typed in the search popover once a pause in typing elapsed (job 492); null shows no live
+    /// results and starts no pause. (A <see cref="LiveSearch"/>, not a <c>Func</c>: <see cref="SearchView"/> is internal.)
+    /// </summary>
+    [Parameter]
+    public LiveSearch? OnLiveSearch { get; set; }
+
+    /// <summary>Called with a live result's note and the query it was found for, when the row is chosen.</summary>
+    [Parameter]
+    public EventCallback<(string Note, string Text)> OnOpenHit { get; set; }
+
+    /// <summary>The most live results the search popover lists; Return shows them all on the Search page.</summary>
+    internal const int MaxLiveHits = 8;
+
+    [Inject]
+    internal ISearchPause Pause { get; set; } = null!;
+
     /// <summary>The shown page's actions, in menu order; empty hides the More actions button.</summary>
     [Parameter]
     public IReadOnlyList<PageAction> PageActions { get; set; } = [];
@@ -183,6 +249,7 @@
         open = !open;
         captureOpen = false;
         searchOpen = false;
+        ResetLive();
         menuOpen = false;
     }
 
@@ -191,6 +258,7 @@
         captureOpen = !captureOpen;
         focusCapture = captureOpen;
         searchOpen = false;
+        ResetLive();
         open = false;
         menuOpen = false;
     }
@@ -201,6 +269,7 @@
         searchOpen = !searchOpen;
         focusSearch = searchOpen;
         searchText = string.Empty;
+        ResetLive();
         captureOpen = false;
         open = false;
         menuOpen = false;
@@ -214,6 +283,7 @@
         open = false;
         captureOpen = false;
         searchOpen = false;
+        ResetLive();
     }
 
     private void Close()
@@ -222,6 +292,7 @@
         captureOpen = false;
         searchOpen = false;
         menuOpen = false;
+        ResetLive();
     }
 
     // An item was chosen (click, or Return through MenuKey): the menu closes and the parent runs the action. A second
@@ -279,7 +350,177 @@
         }
     }
 
-    private void SearchInput(ChangeEventArgs e) => searchText = e.Value?.ToString() ?? string.Empty;
+    // Each keystroke starts the pause again; only a pause that elapses with no newer keystroke searches.
+    private void SearchInput(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        if (OnLiveSearch is null || !searchOpen)
+        {
+            return;
+        }
+
+        CancelLivePause();
+        int mine = ++liveRequest;
+        livePause = new CancellationTokenSource();
+        _ = LiveSearchAsync(mine, livePause.Token);
+    }
+
+    private void SearchChange(ChangeEventArgs e) => searchText = e.Value?.ToString() ?? string.Empty;
+
+    // Waits for the pause, then searches the current text. A result is shown only while no newer pause started and the
+    // popover stayed open (each of those bumps liveRequest); until then the previous list stays.
+    private async Task LiveSearchAsync(int mine, CancellationToken cancel)
+    {
+        try
+        {
+            await Pause.WaitAsync(cancel);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await InvokeAsync(async () =>
+        {
+            if (disposed || mine != liveRequest || !searchOpen || OnLiveSearch is not { } search)
+            {
+                return;
+            }
+
+            string text = searchText;
+            if (!LiveSearchable(text))
+            {
+                live = null;
+                liveQuery = string.Empty;
+                StateHasChanged();
+                return;
+            }
+
+            SearchView result;
+            try
+            {
+                result = await search.Run(text);
+            }
+            catch (Exception)
+            {
+                // A failed live search shows nothing new; Return still runs the full search with its own messages.
+                return;
+            }
+
+            if (disposed || mine != liveRequest || !searchOpen)
+            {
+                return;
+            }
+
+            live = result;
+            liveQuery = text;
+            StateHasChanged();
+        });
+    }
+
+    // Only a plain text search of a valid length is searched as you type: no tag filter or work item query.
+    private static bool LiveSearchable(string text)
+    {
+        string trimmed = text.Trim();
+        return trimmed.Length >= SearchView.MinQueryLength
+            && trimmed.Length <= SearchView.MaxQueryLength
+            && !TagFilter.IsTagFilter(trimmed)
+            && !SearchPanel.IsWorkItemQuery(trimmed);
+    }
+
+    private void CancelLivePause()
+    {
+        if (livePause is { } pending)
+        {
+            livePause = null;
+            pending.Cancel();
+            pending.Dispose();
+        }
+    }
+
+    // The search popover opened or closed: a pending pause never searches, an unfinished search is dropped, no list.
+    private void ResetLive()
+    {
+        CancelLivePause();
+        liveRequest++;
+        live = null;
+        liveQuery = string.Empty;
+        focusLiveRow = -1;
+    }
+
+    private int LiveRowCount => live is { } shown ? Math.Min(shown.Hits.Count, MaxLiveHits) : 0;
+
+    // Keys on a live row: arrows move and stop at the last row, ArrowUp on the first goes back to the input, Enter opens
+    // the row (the popover closes, so the click the browser sends after it finds it closed and does nothing), Esc closes
+    // the popover and focuses the icon.
+    private async Task LiveRowKey(KeyboardEventArgs e, int index, string name)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                focusLiveRow = Math.Min(index + 1, LiveRowCount - 1);
+                break;
+            case "ArrowUp":
+                if (index == 0)
+                {
+                    focusSearch = true;
+                }
+                else
+                {
+                    focusLiveRow = index - 1;
+                }
+
+                break;
+            case "Enter":
+                await OpenLive(name);
+                break;
+            case "Escape":
+                CloseSearchToButton();
+                break;
+        }
+    }
+
+    // A live row was chosen: the popover closes and the parent opens the note for the query the list was found for.
+    private async Task OpenLive(string name)
+    {
+        if (!searchOpen)
+        {
+            return;
+        }
+
+        string text = liveQuery;
+        searchText = string.Empty;
+        searchOpen = false;
+        focusSearch = false;
+        ResetLive();
+        await OnOpenHit.InvokeAsync((name, text));
+    }
+
+    private void CloseSearchToButton()
+    {
+        if (!searchOpen)
+        {
+            return;
+        }
+
+        searchOpen = false;
+        focusSearch = false;
+        focusSearchButton = true;
+        ResetLive();
+    }
+
+    // A pause or search still running when the bar goes away never renders it.
+    public void Dispose()
+    {
+        disposed = true;
+        liveRequest++;
+        CancelLivePause();
+    }
 
     // Return closes the popover and hands the typed text to the parent (which shows the search panel); Esc closes it
     // and gives the focus back to the icon (the bar's own Esc handler also runs, and finds it closed).
@@ -292,9 +533,18 @@
 
         if (e.Key == "Escape")
         {
-            searchOpen = false;
-            focusSearch = false;
-            focusSearchButton = true;
+            CloseSearchToButton();
+            return;
+        }
+
+        // ArrowDown moves into the live results, when a list shows.
+        if (e.Key == "ArrowDown")
+        {
+            if (LiveRowCount > 0)
+            {
+                focusLiveRow = 0;
+            }
+
             return;
         }
 
@@ -307,6 +557,7 @@
         searchText = string.Empty;
         searchOpen = false;
         focusSearch = false;
+        ResetLive();
         await OnSearch.InvokeAsync(text);
     }
 
